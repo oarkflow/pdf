@@ -1,0 +1,262 @@
+package reader
+
+import (
+	"fmt"
+	"os"
+)
+
+// PageInfo holds information about a single PDF page.
+type PageInfo struct {
+	MediaBox  [4]float64
+	Contents  []byte // raw content stream (decompressed)
+	Resources map[string]interface{}
+	Rotation  int
+}
+
+// Reader provides high-level access to a parsed PDF document.
+type Reader struct {
+	resolver *Resolver
+	trailer  map[string]interface{}
+	catalog  map[string]interface{}
+	pages    []map[string]interface{}
+}
+
+// Open parses the PDF data and returns a Reader.
+func Open(data []byte) (*Reader, error) {
+	resolver, err := NewResolver(data)
+	if err != nil {
+		return nil, fmt.Errorf("reader: %w", err)
+	}
+
+	trailer, err := resolver.Trailer()
+	if err != nil {
+		return nil, fmt.Errorf("reader: %w", err)
+	}
+
+	rootRef := trailer["/Root"]
+	rootObj, err := resolver.ResolveReference(rootRef)
+	if err != nil {
+		return nil, fmt.Errorf("reader: resolving catalog: %w", err)
+	}
+	catalog, ok := rootObj.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("reader: catalog is not a dictionary")
+	}
+
+	r := &Reader{
+		resolver: resolver,
+		trailer:  trailer,
+		catalog:  catalog,
+	}
+
+	if err := r.buildPageList(); err != nil {
+		return nil, fmt.Errorf("reader: building page list: %w", err)
+	}
+
+	return r, nil
+}
+
+// OpenFile reads a PDF file and returns a Reader.
+func OpenFile(path string) (*Reader, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return Open(data)
+}
+
+// NumPages returns the number of pages in the document.
+func (r *Reader) NumPages() int {
+	return len(r.pages)
+}
+
+// Page returns information for the 0-indexed page.
+func (r *Reader) Page(n int) (*PageInfo, error) {
+	if n < 0 || n >= len(r.pages) {
+		return nil, fmt.Errorf("page %d out of range [0, %d)", n, len(r.pages))
+	}
+
+	pageDict := r.pages[n]
+
+	info := &PageInfo{}
+
+	// MediaBox.
+	mb := r.inheritedAttr(pageDict, "/MediaBox")
+	if arr, ok := mb.([]interface{}); ok && len(arr) >= 4 {
+		for i := 0; i < 4; i++ {
+			info.MediaBox[i] = toFloat(arr[i])
+		}
+	}
+
+	// Rotation.
+	rot := r.inheritedAttr(pageDict, "/Rotate")
+	if v, ok := rot.(int64); ok {
+		info.Rotation = int(v)
+	}
+
+	// Resources.
+	res := r.inheritedAttr(pageDict, "/Resources")
+	if resRef, ok := res.(IndirectRef); ok {
+		resolved, _ := r.resolver.ResolveObject(resRef.ObjNum)
+		if d, ok := resolved.(map[string]interface{}); ok {
+			res = d
+		}
+	}
+	if d, ok := res.(map[string]interface{}); ok {
+		info.Resources = d
+	} else {
+		info.Resources = make(map[string]interface{})
+	}
+
+	// Contents.
+	contents, _ := r.resolver.ResolveReference(pageDict["/Contents"])
+	if contents != nil {
+		data, err := r.extractContents(contents)
+		if err != nil {
+			return nil, fmt.Errorf("extracting contents for page %d: %w", n, err)
+		}
+		info.Contents = data
+	}
+
+	return info, nil
+}
+
+func (r *Reader) extractContents(contents interface{}) ([]byte, error) {
+	switch c := contents.(type) {
+	case *StreamObject:
+		return r.resolver.DecompressStream(c.Dict, c.Data)
+	case IndirectRef:
+		obj, err := r.resolver.ResolveObject(c.ObjNum)
+		if err != nil {
+			return nil, err
+		}
+		return r.extractContents(obj)
+	case []interface{}:
+		// Array of content streams.
+		var all []byte
+		for _, item := range c {
+			resolved, _ := r.resolver.ResolveReference(item)
+			part, err := r.extractContents(resolved)
+			if err != nil {
+				return nil, err
+			}
+			if len(all) > 0 {
+				all = append(all, '\n')
+			}
+			all = append(all, part...)
+		}
+		return all, nil
+	}
+	return nil, nil
+}
+
+// Metadata returns the document info dictionary as a string map.
+func (r *Reader) Metadata() map[string]string {
+	result := make(map[string]string)
+	infoRef, ok := r.trailer["/Info"]
+	if !ok {
+		return result
+	}
+	infoObj, err := r.resolver.ResolveReference(infoRef)
+	if err != nil {
+		return result
+	}
+	infoDict, ok := infoObj.(map[string]interface{})
+	if !ok {
+		return result
+	}
+	for k, v := range infoDict {
+		if s, ok := v.(string); ok {
+			// Strip the leading / from the key for the result map.
+			key := k
+			if len(key) > 0 && key[0] == '/' {
+				key = key[1:]
+			}
+			result[key] = s
+		}
+	}
+	return result
+}
+
+// Trailer returns the raw trailer dictionary.
+func (r *Reader) Trailer() map[string]interface{} {
+	return r.trailer
+}
+
+// Catalog returns the document catalog dictionary.
+func (r *Reader) Catalog() map[string]interface{} {
+	return r.catalog
+}
+
+// GetResolver returns the underlying resolver for advanced use.
+func (r *Reader) GetResolver() *Resolver {
+	return r.resolver
+}
+
+func (r *Reader) buildPageList() error {
+	pagesRef := r.catalog["/Pages"]
+	pagesObj, err := r.resolver.ResolveReference(pagesRef)
+	if err != nil {
+		return err
+	}
+	pagesDict, ok := pagesObj.(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("Pages is not a dictionary")
+	}
+	return r.collectPages(pagesDict)
+}
+
+func (r *Reader) collectPages(node map[string]interface{}) error {
+	typ, _ := node["/Type"].(string)
+
+	if typ == "/Page" {
+		r.pages = append(r.pages, node)
+		return nil
+	}
+
+	// Pages node.
+	kids, _ := node["/Kids"].([]interface{})
+	for _, kid := range kids {
+		kidObj, err := r.resolver.ResolveReference(kid)
+		if err != nil {
+			continue
+		}
+		kidDict, ok := kidObj.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		// Store parent reference for inheritance.
+		if _, exists := kidDict["_parent"]; !exists {
+			kidDict["_parent"] = node
+		}
+		if err := r.collectPages(kidDict); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *Reader) inheritedAttr(pageDict map[string]interface{}, key string) interface{} {
+	node := pageDict
+	for node != nil {
+		if v, ok := node[key]; ok {
+			resolved, _ := r.resolver.ResolveReference(v)
+			return resolved
+		}
+		parent, _ := node["_parent"].(map[string]interface{})
+		node = parent
+	}
+	return nil
+}
+
+func toFloat(v interface{}) float64 {
+	switch n := v.(type) {
+	case int64:
+		return float64(n)
+	case float64:
+		return n
+	case int:
+		return float64(n)
+	}
+	return 0
+}
