@@ -262,15 +262,30 @@ func (c *converter) applyStyles(node *Node, parentStyle *ComputedStyle) {
 			}
 
 			cssProps := make(map[string]CSSValue)
+			// Collect CSS custom properties first for var() resolution
+			customProps := make(map[string]string)
+			for k, v := range twProps {
+				if strings.HasPrefix(k, "--") {
+					customProps[k] = fmt.Sprintf("%v", v)
+				}
+			}
 			for k, v := range twProps {
 				// Skip variant-prefixed and CSS custom properties
 				if strings.HasPrefix(k, ":variant:") || strings.HasPrefix(k, "--") {
 					continue
 				}
 				vs := fmt.Sprintf("%v", v)
-				// Skip values with unresolvable CSS var() references
+				// Resolve var() references using custom properties
 				if strings.Contains(vs, "var(") {
-					continue
+					vs = resolveVarReferences(vs, customProps)
+					// If still has unresolvable var(), skip
+					if strings.Contains(vs, "var(") {
+						continue
+					}
+				}
+				// Resolve calc() expressions with simple arithmetic
+				if strings.Contains(vs, "calc(") {
+					vs = resolveCalcExpressions(vs)
 				}
 				val := CSSValue{Value: vs}
 				// Expand shorthand properties
@@ -1039,7 +1054,7 @@ p { margin-top: 0; margin-bottom: 8pt; }
 ul, ol { margin-top: 0; margin-bottom: 8pt; padding-left: 30pt; }
 li { margin-bottom: 3pt; }
 table { border-collapse: collapse; margin-top: 8pt; margin-bottom: 8pt; width: 100%; }
-th { font-weight: bold; padding: 6pt 8pt; border-bottom: 2px solid #333; text-align: left; }
+th { font-weight: bold; padding: 6pt 8pt; border-bottom: 2px solid #333; }
 td { padding: 4pt 8pt; border-bottom: 1px solid #ddd; }
 blockquote { margin: 8pt 0; padding: 8pt 15pt; border-left: 3pt solid #ccc; color: #666; font-style: italic; }
 pre { background-color: #f5f5f5; padding: 8pt; margin: 8pt 0; font-family: Courier, monospace; font-size: 10pt; }
@@ -1049,4 +1064,151 @@ hr { border: none; border-top: 1px solid #ccc; margin: 12pt 0; }
 img { max-width: 100%; }
 mark { background-color: #ffff00; }
 small { font-size: 0.85em; }
-`
+` + "\n"
+
+// resolveVarReferences replaces var(--name) with values from customProps.
+func resolveVarReferences(value string, customProps map[string]string) string {
+	for i := 0; i < 10; i++ { // iterate to resolve nested vars
+		idx := strings.Index(value, "var(")
+		if idx < 0 {
+			break
+		}
+		// Find matching closing paren
+		depth := 0
+		end := idx
+		for j := idx; j < len(value); j++ {
+			if value[j] == '(' {
+				depth++
+			} else if value[j] == ')' {
+				depth--
+				if depth == 0 {
+					end = j
+					break
+				}
+			}
+		}
+		varExpr := value[idx+4 : end] // inside var(...)
+		// Handle var(--name, fallback)
+		parts := strings.SplitN(varExpr, ",", 2)
+		varName := strings.TrimSpace(parts[0])
+		resolved, ok := customProps[varName]
+		if !ok {
+			if len(parts) > 1 {
+				resolved = strings.TrimSpace(parts[1])
+			} else {
+				break // can't resolve
+			}
+		}
+		value = value[:idx] + resolved + value[end+1:]
+	}
+	return value
+}
+
+// resolveCalcExpressions attempts to simplify calc() expressions with
+// simple multiplication/addition of a numeric value and a unit.
+func resolveCalcExpressions(value string) string {
+	for {
+		idx := strings.LastIndex(value, "calc(")
+		if idx < 0 {
+			break
+		}
+		// Find matching closing paren after "calc("
+		start := idx + 5
+		depth := 1
+		end := -1
+		for j := start; j < len(value); j++ {
+			if value[j] == '(' {
+				depth++
+			} else if value[j] == ')' {
+				depth--
+				if depth == 0 {
+					end = j
+					break
+				}
+			}
+		}
+		if end < 0 || end <= start {
+			break
+		}
+		inner := strings.TrimSpace(value[start:end])
+
+		// Try to evaluate: "Xunit * Y" or "Y * Xunit" or "Xunit + Yunit"
+		result := tryEvalCalc(inner)
+		if result != "" {
+			value = value[:idx] + result + value[end+1:]
+		} else {
+			// Can't simplify, leave it
+			break
+		}
+	}
+	return value
+}
+
+func tryEvalCalc(expr string) string {
+	expr = strings.TrimSpace(expr)
+
+	// Handle nested calc results: "0.25rem * 1" or "0.25rem * 0"
+	// Pattern: <value><unit> * <number>
+	for _, op := range []string{" * ", " + ", " - "} {
+		parts := strings.SplitN(expr, op, 2)
+		if len(parts) != 2 {
+			continue
+		}
+		left := strings.TrimSpace(parts[0])
+		right := strings.TrimSpace(parts[1])
+
+		lVal, lUnit := parseValueUnit(left)
+		rVal, rUnit := parseValueUnit(right)
+
+		if lUnit != "" && rUnit == "" {
+			// e.g., "0.25rem * 1"
+			switch op {
+			case " * ":
+				return fmt.Sprintf("%g%s", lVal*rVal, lUnit)
+			case " + ":
+				return fmt.Sprintf("%g%s", lVal+rVal, lUnit)
+			case " - ":
+				return fmt.Sprintf("%g%s", lVal-rVal, lUnit)
+			}
+		}
+		if lUnit == "" && rUnit != "" {
+			switch op {
+			case " * ":
+				return fmt.Sprintf("%g%s", lVal*rVal, rUnit)
+			case " + ":
+				return fmt.Sprintf("%g%s", lVal+rVal, rUnit)
+			case " - ":
+				return fmt.Sprintf("%g%s", lVal-rVal, rUnit)
+			}
+		}
+		if lUnit != "" && lUnit == rUnit {
+			switch op {
+			case " + ":
+				return fmt.Sprintf("%g%s", lVal+rVal, lUnit)
+			case " - ":
+				return fmt.Sprintf("%g%s", lVal-rVal, lUnit)
+			}
+		}
+	}
+	return ""
+}
+
+func parseValueUnit(s string) (float64, string) {
+	s = strings.TrimSpace(s)
+	// Try common units
+	for _, unit := range []string{"rem", "em", "px", "pt", "%", "vw", "vh"} {
+		if strings.HasSuffix(s, unit) {
+			numStr := strings.TrimSpace(s[:len(s)-len(unit)])
+			var v float64
+			if _, err := fmt.Sscanf(numStr, "%g", &v); err == nil {
+				return v, unit
+			}
+		}
+	}
+	// Pure number
+	var v float64
+	if _, err := fmt.Sscanf(s, "%g", &v); err == nil {
+		return v, ""
+	}
+	return 0, ""
+}

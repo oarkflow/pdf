@@ -5,8 +5,8 @@ import (
 	"os"
 
 	"github.com/oarkflow/pdf"
-	"github.com/oarkflow/pdf/document"
 	"github.com/oarkflow/pdf/layout"
+	"github.com/oarkflow/pdf/template"
 )
 
 func main() {
@@ -56,38 +56,16 @@ func cmdCreate(args []string) {
 		output = args[0]
 	}
 
-	doc := document.NewDocument(document.A4)
-	doc.SetMetadata(document.Metadata{
-		Title:   "Sample Document",
-		Creator: "pdf CLI",
-	})
-
-	elements := []layout.Element{
+	t := template.New("sample")
+	t.AddSection("main",
 		layout.NewHeading(layout.H1, "Sample PDF Document"),
 		layout.NewSpacer(12),
 		layout.NewParagraph("This is a sample PDF created by the pdf CLI tool."),
 		layout.NewSpacer(8),
 		layout.NewParagraph("You can use this tool to create, merge, and manipulate PDF files."),
-	}
-
-	pages := layout.RenderPages(elements,
-		document.A4.Width, document.A4.Height,
-		72, 72, 72, 72,
 	)
 
-	for _, pr := range pages {
-		p := document.NewPage(document.PageSize{Width: pr.Width, Height: pr.Height})
-		p.Contents = pr.Content
-		for name, fe := range pr.Fonts {
-			p.Fonts[name] = fe.ObjectNum
-		}
-		for name, ie := range pr.Images {
-			p.Images[name] = ie
-		}
-		doc.AddPage(p)
-	}
-
-	if err := doc.Save(output); err != nil {
+	if err := t.Execute(nil, output); err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating PDF: %v\n", err)
 		os.Exit(1)
 	}
@@ -114,7 +92,6 @@ func cmdInfo(args []string) {
 		fmt.Fprintln(os.Stderr, "Usage: pdf info <file.pdf>")
 		os.Exit(1)
 	}
-	// Stub: PDF reading/parsing not yet implemented
 	fmt.Printf("Info for %s: (PDF reader not yet implemented)\n", args[0])
 }
 
@@ -123,7 +100,6 @@ func cmdText(args []string) {
 		fmt.Fprintln(os.Stderr, "Usage: pdf text <file.pdf> [page]")
 		os.Exit(1)
 	}
-	// Stub: PDF text extraction not yet implemented
 	fmt.Printf("Text extraction for %s: (PDF reader not yet implemented)\n", args[0])
 }
 
@@ -132,7 +108,6 @@ func cmdSign(args []string) {
 		fmt.Fprintln(os.Stderr, "Usage: pdf sign -key key.pem -cert cert.pem <input.pdf> <output.pdf>")
 		os.Exit(1)
 	}
-	// Stub: PDF signing not yet implemented
 	fmt.Println("PDF signing: (not yet implemented)")
 }
 

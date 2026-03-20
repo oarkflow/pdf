@@ -1,5 +1,5 @@
 // Package main demonstrates generating a beautiful, professional invoice PDF
-// from HTML+CSS using the github.com/oarkflow/pdf library.
+// from HTML+CSS using the github.com/oarkflow/pdf library with {{placeholder}} templates.
 //
 // Run:
 //
@@ -18,15 +18,15 @@ import (
 
 	"github.com/oarkflow/pdf"
 	"github.com/oarkflow/pdf/html"
+	"github.com/oarkflow/pdf/template"
 )
 
 func main() {
-	invoiceHTML := buildInvoiceHTML(InvoiceData{
-		Number:      "INV-2026-0042",
-		Date:        time.Now().Format("January 2, 2006"),
-		DueDate:     time.Now().AddDate(0, 0, 30).Format("January 2, 2006"),
-		Currency:    "USD",
-		LogoDataURI: loadLogoDataURI(),
+	d := InvoiceData{
+		Number:   "INV-2026-0042",
+		Date:     time.Now().Format("January 2, 2006"),
+		DueDate:  time.Now().AddDate(0, 0, 30).Format("January 2, 2006"),
+		Currency: "USD",
 		From: Company{
 			Name:    "Acme Corporation",
 			Address: "123 Innovation Drive",
@@ -59,7 +59,87 @@ func main() {
 		TaxRate:     8.5,
 		Notes:       "Thank you for your business! Payment is due within 30 days. Late payments may incur a 1.5% monthly finance charge.",
 		PaymentInfo: "Wire Transfer: First National Bank, Routing #021000021, Account #1234567890\nOr pay online at: https://pay.acmecorp.com/inv/2026-0042",
-	})
+	}
+
+	// Calculate totals
+	subtotal := 0.0
+	for _, item := range d.Items {
+		subtotal += float64(item.Qty) * item.UnitPrice
+	}
+	tax := subtotal * d.TaxRate / 100
+	total := subtotal + tax
+
+	// Build item rows HTML
+	itemRows := ""
+	for i, item := range d.Items {
+		amount := float64(item.Qty) * item.UnitPrice
+		bgColor := "#ffffff"
+		if i%2 == 1 {
+			bgColor = "#f8f9fb"
+		}
+		itemRows += fmt.Sprintf(`
+        <tr style="background-color: %s;">
+          <td style="padding: 10px 12px; border-bottom: 1px solid #eaedf1;">
+            <div style="font-weight: 600; color: #1a1f36;">%s</div>
+            <div style="font-size: 8.5pt; color: #6b7294; margin-top: 2px;">%s</div>
+          </td>
+          <td style="padding: 10px 12px; border-bottom: 1px solid #eaedf1; text-align: center; color: #3c4257;">%d</td>
+          <td style="padding: 10px 12px; border-bottom: 1px solid #eaedf1; text-align: right; color: #3c4257;">%s</td>
+          <td style="padding: 10px 12px; border-bottom: 1px solid #eaedf1; text-align: right; font-weight: 600; color: #1a1f36;">%s</td>
+        </tr>`, bgColor, item.Description, item.Details, item.Qty, fmtMoney(item.UnitPrice), fmtMoney(amount))
+	}
+
+	// Build logo HTML
+	logoHTML := ""
+	logoDataURI := loadLogoDataURI()
+	if logoDataURI != "" {
+		logoHTML = fmt.Sprintf(`<img class="brand-logo" src="%s" alt="%s logo">`, logoDataURI, d.From.Name)
+	}
+
+	// Build tax ID line
+	taxIDLine := ""
+	if d.From.TaxID != "" {
+		taxIDLine = "<br>Tax ID: " + d.From.TaxID
+	}
+
+	// Build the data map for {{placeholder}} resolution
+	data := map[string]string{
+		"invoice_number":     d.Number,
+		"from_name":          d.From.Name,
+		"from_email":         d.From.Email,
+		"from_phone":         d.From.Phone,
+		"from_website":       d.From.Website,
+		"from_address":       d.From.Address,
+		"from_city":          d.From.City,
+		"from_state":         d.From.State,
+		"from_zip":           d.From.Zip,
+		"from_country":       d.From.Country,
+		"from_tax_id":        d.From.TaxID,
+		"from_tax_id_line":   taxIDLine,
+		"from_full_address":  d.From.Address + ", " + d.From.City + ", " + d.From.State + " " + d.From.Zip,
+		"to_name":            d.To.Name,
+		"to_address":         d.To.Address,
+		"to_city":            d.To.City,
+		"to_state":           d.To.State,
+		"to_zip":             d.To.Zip,
+		"to_country":         d.To.Country,
+		"to_phone":           d.To.Phone,
+		"to_email":           d.To.Email,
+		"date":               d.Date,
+		"due_date":           d.DueDate,
+		"currency":           d.Currency,
+		"logo_html":          logoHTML,
+		"item_rows":          itemRows,
+		"subtotal":           fmtMoney(subtotal),
+		"tax_rate":           fmt.Sprintf("%.1f", d.TaxRate),
+		"tax":                fmtMoney(tax),
+		"total":              fmtMoney(total),
+		"notes":              d.Notes,
+		"payment_info":       d.PaymentInfo,
+	}
+
+	// Resolve {{placeholders}} in the HTML template
+	invoiceHTML := template.ReplaceMap(invoiceHTMLTemplate, data)
 
 	err := pdf.FromHTML(invoiceHTML, "invoice.pdf", html.Options{
 		DefaultFontSize:   10,
@@ -115,7 +195,6 @@ type LineItem struct {
 
 type InvoiceData struct {
 	Number, Date, DueDate, Currency string
-	LogoDataURI                     string
 	From, To                        Company
 	Items                           []LineItem
 	TaxRate                         float64
@@ -139,65 +218,34 @@ func loadLogoDataURI() string {
 	return ""
 }
 
+func fmtMoney(v float64) string {
+	s := fmt.Sprintf("%.2f", v)
+	parts := strings.SplitN(s, ".", 2)
+	intPart := parts[0]
+	decPart := parts[1]
+	n := len(intPart)
+	if n <= 3 {
+		return "$" + intPart + "." + decPart
+	}
+	var result []byte
+	for i, c := range intPart {
+		if i > 0 && (n-i)%3 == 0 {
+			result = append(result, ',')
+		}
+		result = append(result, byte(c))
+	}
+	return "$" + string(result) + "." + decPart
+}
+
 // ---------------------------------------------------------------------------
-// HTML builder
+// HTML template with {{placeholder}} syntax
 // ---------------------------------------------------------------------------
 
-func buildInvoiceHTML(d InvoiceData) string {
-	// Calculate totals
-	subtotal := 0.0
-	for _, item := range d.Items {
-		subtotal += float64(item.Qty) * item.UnitPrice
-	}
-	tax := subtotal * d.TaxRate / 100
-	total := subtotal + tax
-
-	fmtMoney := func(v float64) string {
-		// Format with commas as thousands separator
-		s := fmt.Sprintf("%.2f", v)
-		parts := strings.SplitN(s, ".", 2)
-		intPart := parts[0]
-		decPart := parts[1]
-		// Insert commas
-		n := len(intPart)
-		if n <= 3 {
-			return "$" + intPart + "." + decPart
-		}
-		var result []byte
-		for i, c := range intPart {
-			if i > 0 && (n-i)%3 == 0 {
-				result = append(result, ',')
-			}
-			result = append(result, byte(c))
-		}
-		return "$" + string(result) + "." + decPart
-	}
-
-	// Build item rows
-	itemRows := ""
-	for i, item := range d.Items {
-		amount := float64(item.Qty) * item.UnitPrice
-		bgColor := "#ffffff"
-		if i%2 == 1 {
-			bgColor = "#f8f9fb"
-		}
-		itemRows += fmt.Sprintf(`
-        <tr style="background-color: %s;">
-          <td style="padding: 10px 12px; border-bottom: 1px solid #eaedf1;">
-            <div style="font-weight: 600; color: #1a1f36;">%s</div>
-            <div style="font-size: 8.5pt; color: #6b7294; margin-top: 2px;">%s</div>
-          </td>
-          <td style="padding: 10px 12px; border-bottom: 1px solid #eaedf1; text-align: center; color: #3c4257;">%d</td>
-          <td style="padding: 10px 12px; border-bottom: 1px solid #eaedf1; text-align: right; color: #3c4257;">%s</td>
-          <td style="padding: 10px 12px; border-bottom: 1px solid #eaedf1; text-align: right; font-weight: 600; color: #1a1f36;">%s</td>
-        </tr>`, bgColor, item.Description, item.Details, item.Qty, fmtMoney(item.UnitPrice), fmtMoney(amount))
-	}
-
-	return fmt.Sprintf(`<!DOCTYPE html>
+const invoiceHTMLTemplate = `<!DOCTYPE html>
 <html>
 <head>
-  <title>Invoice %s</title>
-  <meta name="author" content="%s">
+  <title>Invoice {{invoice_number}}</title>
+  <meta name="author" content="{{from_name}}">
   <style>
     @page {
       size: A4;
@@ -313,7 +361,7 @@ func buildInvoiceHTML(d InvoiceData) string {
 
     /* ---------- Table ---------- */
     .items-table {
-      width: 100%%;
+      width: 100%;
       border-collapse: collapse;
       margin-bottom: 0;
     }
@@ -425,13 +473,13 @@ func buildInvoiceHTML(d InvoiceData) string {
   <!-- ===== HEADER ===== -->
   <div class="header">
     <div class="brand-wrap">
-      %s
-      <div class="brand">%s</div>
-      <div class="brand-sub">%s &bull; %s &bull; %s</div>
+      {{logo_html}}
+      <div class="brand">{{from_name}}</div>
+      <div class="brand-sub">{{from_email}} &bull; {{from_phone}} &bull; {{from_website}}</div>
     </div>
     <div class="invoice-title">
       <div class="invoice-label">INVOICE</div>
-      <div class="invoice-number">%s</div>
+      <div class="invoice-number">{{invoice_number}}</div>
     </div>
   </div>
 
@@ -439,15 +487,15 @@ func buildInvoiceHTML(d InvoiceData) string {
   <div class="date-strip">
     <div class="date-item">
       <div class="date-label">Invoice Date</div>
-      <div class="date-value">%s</div>
+      <div class="date-value">{{date}}</div>
     </div>
     <div class="date-item">
       <div class="date-label">Due Date</div>
-      <div class="date-value">%s</div>
+      <div class="date-value">{{due_date}}</div>
     </div>
     <div class="date-item">
       <div class="date-label">Currency</div>
-      <div class="date-value">%s</div>
+      <div class="date-value">{{currency}}</div>
     </div>
   </div>
 
@@ -455,25 +503,25 @@ func buildInvoiceHTML(d InvoiceData) string {
   <div class="info-grid">
     <div class="info-block">
       <div class="label">Bill From</div>
-      <div class="name">%s</div>
+      <div class="name">{{from_name}}</div>
       <div class="detail">
-        %s<br>
-        %s, %s %s<br>
-        %s<br>
-        %s<br>
-        %s
-        %s
+        {{from_address}}<br>
+        {{from_city}}, {{from_state}} {{from_zip}}<br>
+        {{from_country}}<br>
+        {{from_phone}}<br>
+        {{from_email}}
+        {{from_tax_id_line}}
       </div>
     </div>
     <div class="info-block">
       <div class="label">Bill To</div>
-      <div class="name">%s</div>
+      <div class="name">{{to_name}}</div>
       <div class="detail">
-        %s<br>
-        %s, %s %s<br>
-        %s<br>
-        %s<br>
-        %s
+        {{to_address}}<br>
+        {{to_city}}, {{to_state}} {{to_zip}}<br>
+        {{to_country}}<br>
+        {{to_phone}}<br>
+        {{to_email}}
       </div>
     </div>
   </div>
@@ -489,7 +537,7 @@ func buildInvoiceHTML(d InvoiceData) string {
       </tr>
     </thead>
     <tbody>
-      %s
+      {{item_rows}}
     </tbody>
   </table>
 
@@ -499,15 +547,15 @@ func buildInvoiceHTML(d InvoiceData) string {
     <div class="totals-box">
       <div class="totals-row">
         <div class="totals-label">Subtotal</div>
-        <div class="totals-value">%s</div>
+        <div class="totals-value">{{subtotal}}</div>
       </div>
       <div class="totals-row">
-        <div class="totals-label">Tax (%.1f%%)</div>
-        <div class="totals-value">%s</div>
+        <div class="totals-label">Tax ({{tax_rate}}%)</div>
+        <div class="totals-value">{{tax}}</div>
       </div>
       <div class="totals-row grand-total">
         <div class="totals-label">Total Due</div>
-        <div class="totals-value">%s</div>
+        <div class="totals-value">{{total}}</div>
       </div>
     </div>
   </div>
@@ -516,57 +564,18 @@ func buildInvoiceHTML(d InvoiceData) string {
   <div class="footer-grid">
     <div class="footer-block">
       <div class="block-title">Notes</div>
-      <div class="block-body">%s</div>
+      <div class="block-body">{{notes}}</div>
     </div>
     <div class="footer-block">
       <div class="block-title">Payment Information</div>
-      <div class="block-body">%s</div>
+      <div class="block-body">{{payment_info}}</div>
     </div>
   </div>
 
   <!-- ===== BOTTOM BAR ===== -->
   <div class="bottom-bar">
-    %s &bull; %s &bull; %s &bull; Tax ID: %s
+    {{from_name}} &bull; {{from_full_address}} &bull; {{from_email}} &bull; Tax ID: {{from_tax_id}}
   </div>
 
 </body>
-</html>`,
-		// title, author
-		d.Number, d.From.Name,
-		// header
-		func() string {
-			if d.LogoDataURI == "" {
-				return ""
-			}
-			return fmt.Sprintf(`<img class="brand-logo" src="%s" alt="%s logo">`, d.LogoDataURI, d.From.Name)
-		}(),
-		d.From.Name, d.From.Email, d.From.Phone, d.From.Website,
-		// invoice number
-		d.Number,
-		// dates
-		d.Date, d.DueDate, d.Currency,
-		// from
-		d.From.Name, d.From.Address,
-		d.From.City, d.From.State, d.From.Zip, d.From.Country,
-		d.From.Phone, d.From.Email,
-		func() string {
-			if d.From.TaxID != "" {
-				return fmt.Sprintf("<br>Tax ID: %s", d.From.TaxID)
-			}
-			return ""
-		}(),
-		// to
-		d.To.Name, d.To.Address,
-		d.To.City, d.To.State, d.To.Zip, d.To.Country,
-		d.To.Phone, d.To.Email,
-		// items
-		itemRows,
-		// totals
-		fmtMoney(subtotal), d.TaxRate, fmtMoney(tax), fmtMoney(total),
-		// notes + payment
-		d.Notes, d.PaymentInfo,
-		// bottom bar
-		d.From.Name, d.From.Address+", "+d.From.City+", "+d.From.State+" "+d.From.Zip,
-		d.From.Email, d.From.TaxID,
-	)
-}
+</html>`

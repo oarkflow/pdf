@@ -521,6 +521,11 @@ func (e *FlexContainerElement) PlanLayout(area layout.LayoutArea) layout.LayoutP
 
 	isRow := e.Style == nil || e.Style.FlexDirection == "" || e.Style.FlexDirection == "row" || e.Style.FlexDirection == "row-reverse"
 
+	justify := ""
+	if e.Style != nil {
+		justify = e.Style.JustifyContent
+	}
+
 	if isRow {
 		gap := 0.0
 		if e.Style != nil && e.Style.Gap > 0 {
@@ -544,6 +549,9 @@ func (e *FlexContainerElement) PlanLayout(area layout.LayoutArea) layout.LayoutP
 			basis := 0.0
 			if child.Style != nil && !child.Style.FlexBasis.IsAuto() && child.Style.FlexBasis.Value > 0 {
 				basis = child.Style.FlexBasis.ToPoints(availableWidth, 12)
+			} else if child.Style != nil && !child.Style.Width.IsAuto() && child.Style.Width.Value > 0 {
+				// Use explicit width (e.g. w-1/3) as basis
+				basis = child.Style.Width.ToPoints(innerWidth, 12)
 			} else if grow == 0 {
 				basis = estimateIntrinsicWidth(child.Element)
 			}
@@ -572,33 +580,79 @@ func (e *FlexContainerElement) PlanLayout(area layout.LayoutArea) layout.LayoutP
 					widths[i] += remainingWidth * (grow / totalGrow)
 				}
 			}
-		} else {
-			extra := remainingWidth / math.Max(1, float64(n))
-			for i := range widths {
-				widths[i] += extra
-			}
 		}
+		// Don't distribute extra space equally when no grow — leave it for justify-content
 
-		xOffset := bm.ContentLeft()
+		// Layout each child and record its consumed height
+		type childLayout struct {
+			blocks   []layout.PlacedBlock
+			width    float64
+			consumed float64
+		}
+		layouts := make([]childLayout, n)
 		maxH := 0.0
+		usedWidth := 0.0
 		for i, child := range e.Children {
 			plan := child.Element.PlanLayout(layout.LayoutArea{Width: widths[i], Height: 5000})
-			for _, b := range plan.Blocks {
-				b.X += xOffset
-				b.Y += consumed
-				blocks = append(blocks, b)
-			}
-			xOffset += widths[i]
-			if i < n-1 {
-				xOffset += gap
-			}
+			layouts[i] = childLayout{blocks: plan.Blocks, width: widths[i], consumed: plan.Consumed}
+			usedWidth += widths[i]
 			if plan.Consumed > maxH {
 				maxH = plan.Consumed
 			}
 		}
+
+		// Calculate starting X and per-item gap based on justify-content
+		freeSpace := innerWidth - usedWidth - totalGap
+		if freeSpace < 0 {
+			freeSpace = 0
+		}
+		startX := bm.ContentLeft()
+		extraGap := 0.0
+		switch justify {
+		case "flex-end", "end":
+			startX += freeSpace
+		case "center":
+			startX += freeSpace / 2
+		case "space-between":
+			if n > 1 {
+				extraGap = freeSpace / float64(n-1)
+			}
+		case "space-around":
+			if n > 0 {
+				itemGap := freeSpace / float64(n)
+				startX += itemGap / 2
+				extraGap = itemGap
+			}
+		case "space-evenly":
+			if n > 0 {
+				itemGap := freeSpace / float64(n+1)
+				startX += itemGap
+				extraGap = itemGap
+			}
+		default: // flex-start or empty
+		}
+
+		xOffset := startX
+		for i := range layouts {
+			cl := &layouts[i]
+			for _, b := range cl.blocks {
+				b.X += xOffset
+				b.Y += consumed
+				blocks = append(blocks, b)
+			}
+			xOffset += cl.width
+			if i < n-1 {
+				xOffset += gap + extraGap
+			}
+		}
 		consumed += maxH
 	} else {
-		for _, child := range e.Children {
+		// Column layout
+		gap := 0.0
+		if e.Style != nil && e.Style.Gap > 0 {
+			gap = e.Style.Gap
+		}
+		for i, child := range e.Children {
 			plan := child.Element.PlanLayout(layout.LayoutArea{Width: innerWidth, Height: 5000})
 			for _, b := range plan.Blocks {
 				b.X += bm.ContentLeft()
@@ -606,6 +660,9 @@ func (e *FlexContainerElement) PlanLayout(area layout.LayoutArea) layout.LayoutP
 				blocks = append(blocks, b)
 			}
 			consumed += plan.Consumed
+			if i < len(e.Children)-1 {
+				consumed += gap
+			}
 		}
 	}
 	consumed += bm.PaddingBottom + bm.BorderBottomWidth + bm.MarginBottom
