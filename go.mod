@@ -3,7 +3,7 @@ module github.com/oarkflow/pdf
 go 1.26.1
 
 require (
-	github.com/dop251/goja v0.0.0-20260311135729-065cd970411c
+	github.com/dop251/goja v0.0.0-20260311135729-065cd970411c // only used with -tags js_engine
 	golang.org/x/image v0.37.0
 	golang.org/x/net v0.52.0
 )

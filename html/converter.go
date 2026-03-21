@@ -2,12 +2,40 @@ package html
 
 import (
 	"fmt"
+	"log"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/oarkflow/pdf/layout"
 	"github.com/oarkflow/pdf/tailwind"
 )
+
+// applyTextTransform applies the CSS text-transform property to text.
+func applyTextTransform(text, transform string) string {
+	switch transform {
+	case "uppercase":
+		return strings.ToUpper(text)
+	case "lowercase":
+		return strings.ToLower(text)
+	case "capitalize":
+		runes := []rune(text)
+		inWord := false
+		for i, r := range runes {
+			if unicode.IsLetter(r) || unicode.IsDigit(r) {
+				if !inWord {
+					runes[i] = unicode.ToUpper(r)
+					inWord = true
+				}
+			} else {
+				inWord = false
+			}
+		}
+		return string(runes)
+	default:
+		return text
+	}
+}
 
 // Options configures the HTML to PDF conversion.
 type Options struct {
@@ -70,7 +98,7 @@ func Convert(htmlString string, opts Options) (*ConvertResult, error) {
 	if opts.EnableJavaScript {
 		if err := ExecuteScripts(dom, c.fetcher); err != nil {
 			// Log warning but don't fail — partial JS is OK
-			fmt.Printf("Warning: JavaScript execution: %v\n", err)
+			log.Printf("Warning: JavaScript execution: %v", err)
 		}
 	}
 
@@ -879,6 +907,7 @@ func (c *converter) collectTextRunsRecursive(node *Node, runs *[]layout.TextRun,
 				style = NewDefaultStyle()
 			}
 		}
+		text = applyTextTransform(text, style.TextTransform)
 		*runs = append(*runs, layout.TextRun{
 			Text:      text,
 			FontName:  style.FontFamily,
@@ -951,6 +980,7 @@ func (c *converter) textRunsFromText(node *Node) []layout.TextRun {
 	if !isPreformatted {
 		text = collapseWhitespace(text)
 	}
+	text = applyTextTransform(text, style.TextTransform)
 	return []layout.TextRun{{
 		Text:     text,
 		FontName: style.FontFamily,

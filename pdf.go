@@ -1,12 +1,15 @@
 package pdf
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/oarkflow/pdf/document"
 	"github.com/oarkflow/pdf/html"
 	"github.com/oarkflow/pdf/layout"
+	"github.com/oarkflow/pdf/reader"
 )
 
 // Common page sizes re-exported for convenience.
@@ -20,7 +23,13 @@ var (
 
 // Quick creates a simple PDF with text content and saves it to outputPath.
 func Quick(text string, outputPath string) error {
-	doc := document.NewDocument(document.A4)
+	if outputPath == "" {
+		return errors.New("pdf: output path is empty")
+	}
+	doc, err := document.NewDocument(document.A4)
+	if err != nil {
+		return err
+	}
 	elements := []layout.Element{
 		layout.NewParagraph(text),
 	}
@@ -47,6 +56,12 @@ func Quick(text string, outputPath string) error {
 
 // FromHTML converts HTML content to a PDF file.
 func FromHTML(htmlContent string, outputPath string, opts ...html.Options) error {
+	if htmlContent == "" {
+		return errors.New("pdf: HTML content is empty")
+	}
+	if outputPath == "" {
+		return errors.New("pdf: output path is empty")
+	}
 	var opt html.Options
 	if len(opts) > 0 {
 		opt = opts[0]
@@ -57,10 +72,13 @@ func FromHTML(htmlContent string, outputPath string, opts ...html.Options) error
 		return fmt.Errorf("converting HTML: %w", err)
 	}
 
-	doc := document.NewDocument(document.PageSize{
+	doc, err := document.NewDocument(document.PageSize{
 		Width:  result.Config.Width,
 		Height: result.Config.Height,
 	})
+	if err != nil {
+		return fmt.Errorf("creating document: %w", err)
+	}
 	doc.SetMargins(document.Margins{
 		Top:    result.Config.Margins[0],
 		Right:  result.Config.Margins[1],
@@ -97,6 +115,9 @@ func FromHTML(htmlContent string, outputPath string, opts ...html.Options) error
 // Merge merges multiple PDF files into a single output file.
 // This is a simplified implementation that concatenates pages.
 func Merge(outputPath string, inputPaths ...string) error {
+	if outputPath == "" {
+		return errors.New("pdf: output path is empty")
+	}
 	if len(inputPaths) == 0 {
 		return fmt.Errorf("no input files provided")
 	}
@@ -108,17 +129,136 @@ func Merge(outputPath string, inputPaths ...string) error {
 		}
 	}
 
-	// PDF merging requires a reader/parser which is not yet implemented.
-	// For now, return an informative error.
-	return fmt.Errorf("PDF merge requires a PDF reader (not yet implemented)")
+	return reader.MergeFiles(inputPaths, outputPath)
 }
 
 // NewDocument creates a new document with the given page size.
 // If no page size is provided, A4 is used.
-func NewDocument(pageSize ...document.PageSize) *document.Document {
+func NewDocument(pageSize ...document.PageSize) (*document.Document, error) {
 	ps := document.A4
 	if len(pageSize) > 0 {
 		ps = pageSize[0]
 	}
 	return document.NewDocument(ps)
+}
+
+// FromHTMLStreaming converts HTML content and writes the PDF directly to out
+// without buffering the entire document in memory.
+func FromHTMLStreaming(htmlContent string, out io.Writer, opts ...html.Options) error {
+	if htmlContent == "" {
+		return errors.New("pdf: HTML content is empty")
+	}
+	if out == nil {
+		return errors.New("pdf: writer is nil")
+	}
+	var opt html.Options
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
+
+	result, err := html.Convert(htmlContent, opt)
+	if err != nil {
+		return fmt.Errorf("converting HTML: %w", err)
+	}
+
+	doc, err := document.NewDocument(document.PageSize{
+		Width:  result.Config.Width,
+		Height: result.Config.Height,
+	})
+	if err != nil {
+		return fmt.Errorf("creating document: %w", err)
+	}
+	doc.SetMargins(document.Margins{
+		Top:    result.Config.Margins[0],
+		Right:  result.Config.Margins[1],
+		Bottom: result.Config.Margins[2],
+		Left:   result.Config.Margins[3],
+	})
+
+	if title, ok := result.Metadata["title"]; ok {
+		doc.SetMetadata(document.Metadata{Title: title})
+	}
+
+	pages := layout.RenderPages(
+		result.Elements,
+		result.Config.Width, result.Config.Height,
+		result.Config.Margins[0], result.Config.Margins[1],
+		result.Config.Margins[2], result.Config.Margins[3],
+	)
+
+	for _, pr := range pages {
+		p := document.NewPage(document.PageSize{Width: pr.Width, Height: pr.Height})
+		p.Contents = pr.Content
+		for name, fe := range pr.Fonts {
+			p.Fonts[name] = fe.ObjectNum
+		}
+		for name, ie := range pr.Images {
+			p.Images[name] = ie
+		}
+		doc.AddPage(p)
+	}
+
+	return doc.WriteStreamingTo(out)
+}
+
+// FromURL fetches a webpage by URL and converts it to a PDF file.
+// The URL is automatically used as BaseURL for resolving relative resources
+// (CSS, images) unless overridden in opts.
+func FromURL(url string, outputPath string, opts ...html.Options) error {
+	if url == "" {
+		return errors.New("pdf: URL is empty")
+	}
+	if outputPath == "" {
+		return errors.New("pdf: output path is empty")
+	}
+
+	htmlContent, err := fetchHTML(url)
+	if err != nil {
+		return fmt.Errorf("fetching URL: %w", err)
+	}
+
+	var opt html.Options
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
+	if opt.BaseURL == "" {
+		opt.BaseURL = url
+	}
+
+	return FromHTML(htmlContent, outputPath, opt)
+}
+
+// FromURLStreaming fetches a webpage by URL and writes the PDF directly to out.
+func FromURLStreaming(url string, out io.Writer, opts ...html.Options) error {
+	if url == "" {
+		return errors.New("pdf: URL is empty")
+	}
+	if out == nil {
+		return errors.New("pdf: writer is nil")
+	}
+
+	htmlContent, err := fetchHTML(url)
+	if err != nil {
+		return fmt.Errorf("fetching URL: %w", err)
+	}
+
+	var opt html.Options
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
+	if opt.BaseURL == "" {
+		opt.BaseURL = url
+	}
+
+	return FromHTMLStreaming(htmlContent, out, opt)
+}
+
+// fetchHTML fetches the HTML content from a URL using the existing Fetcher.
+func fetchHTML(url string) (string, error) {
+	f := html.NewFetcher(url)
+	data, err := f.Fetch(url)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }

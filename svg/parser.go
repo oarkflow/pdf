@@ -6,6 +6,11 @@ import (
 	"strings"
 )
 
+const (
+	maxSVGDepth = 200
+	maxSVGNodes = 50000
+)
+
 // SVGNode represents a node in the SVG document tree.
 type SVGNode struct {
 	Tag      string
@@ -29,6 +34,7 @@ func ParseReader(r io.Reader) (*SVGNode, error) {
 
 	var root *SVGNode
 	var stack []*SVGNode
+	nodeCount := 0
 
 	for {
 		tok, err := decoder.Token()
@@ -41,6 +47,12 @@ func ParseReader(r io.Reader) (*SVGNode, error) {
 
 		switch t := tok.(type) {
 		case xml.StartElement:
+			if len(stack) >= maxSVGDepth || nodeCount >= maxSVGNodes {
+				// Skip this element entirely by consuming until its end
+				decoder.Skip()
+				continue
+			}
+			nodeCount++
 			node := &SVGNode{
 				Tag:   stripNS(t.Name),
 				Attrs: make(map[string]string),

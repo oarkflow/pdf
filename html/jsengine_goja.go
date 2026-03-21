@@ -36,7 +36,7 @@ func ExecuteScripts(dom *Node, fetcher *Fetcher) error {
 				log.Printf("jsengine: skipping script src=%s: %v", src, err)
 				continue
 			}
-			if _, err := vm.RunString(string(data)); err != nil {
+			if err := safeRunString(vm, string(data)); err != nil {
 				log.Printf("jsengine: error in script src=%s: %v", src, err)
 			}
 			continue
@@ -46,7 +46,7 @@ func ExecuteScripts(dom *Node, fetcher *Fetcher) error {
 		if strings.TrimSpace(code) == "" {
 			continue
 		}
-		if _, err := vm.RunString(code); err != nil {
+		if err := safeRunString(vm, code); err != nil {
 			log.Printf("jsengine: error in inline script: %v", err)
 		}
 	}
@@ -238,7 +238,7 @@ func resolveAlpineBindings(vm *goja.Runtime, dom *Node) {
 		}
 
 		// Evaluate x-data expression to get scope object
-		val, err := vm.RunString("(" + xData + ")")
+		val, err := safeRunStringVal(vm, "("+xData+")")
 		if err != nil {
 			log.Printf("jsengine: error evaluating x-data=%q: %v", xData, err)
 			continue
@@ -301,10 +301,33 @@ func evalInScopeRaw(vm *goja.Runtime, scope *goja.Object, expr string) goja.Valu
 	// Use with(scope) to evaluate
 	vm.Set("__alpine_scope__", scope)
 	code := fmt.Sprintf("(function(){ with(__alpine_scope__) { return (%s); } })()", expr)
-	val, err := vm.RunString(code)
+	val, err := safeRunStringVal(vm, code)
 	if err != nil {
 		log.Printf("jsengine: error evaluating expression %q: %v", expr, err)
 		return nil
 	}
 	return val
+}
+
+// safeRunString runs JS code with panic recovery, returning only an error.
+func safeRunString(vm *goja.Runtime, code string) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic: %v", r)
+		}
+	}()
+	_, err = vm.RunString(code)
+	return err
+}
+
+// safeRunStringVal runs JS code with panic recovery, returning the value and error.
+func safeRunStringVal(vm *goja.Runtime, code string) (val goja.Value, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic: %v", r)
+			val = nil
+		}
+	}()
+	val, err = vm.RunString(code)
+	return val, err
 }

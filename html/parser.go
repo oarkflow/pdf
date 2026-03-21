@@ -19,26 +19,36 @@ type Node struct {
 	ID       string
 }
 
+const (
+	maxDOMDepth = 500
+	maxDOMNodes = 100000
+)
+
 // ParseHTML parses HTML from a reader and returns the root node.
 func ParseHTML(r io.Reader) (*Node, error) {
 	doc, err := html.Parse(r)
 	if err != nil {
 		return nil, err
 	}
-	root := parseNode(doc, nil)
+	nodeCount := 0
+	root := parseNode(doc, nil, 0, &nodeCount)
 	if root == nil {
 		root = &Node{Tag: "html", Attrs: make(map[string]string)}
 	}
 	return root, nil
 }
 
-func parseNode(n *html.Node, parent *Node) *Node {
+func parseNode(n *html.Node, parent *Node, depth int, nodeCount *int) *Node {
+	if depth > maxDOMDepth || *nodeCount >= maxDOMNodes {
+		return nil
+	}
+	*nodeCount++
 	switch n.Type {
 	case html.DocumentNode:
 		// Wrap children under a virtual root
 		root := &Node{Tag: "", Attrs: make(map[string]string), Parent: parent}
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			child := parseNode(c, root)
+			child := parseNode(c, root, depth+1, nodeCount)
 			if child != nil {
 				root.Children = append(root.Children, child)
 			}
@@ -74,7 +84,7 @@ func parseNode(n *html.Node, parent *Node) *Node {
 			}
 		}
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			child := parseNode(c, node)
+			child := parseNode(c, node, depth+1, nodeCount)
 			if child != nil {
 				node.Children = append(node.Children, child)
 			}

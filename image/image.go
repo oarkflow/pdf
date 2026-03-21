@@ -1,12 +1,14 @@
 package image
 
 import (
+	"bytes"
 	"fmt"
 	goimage "image"
 	"image/color"
 	_ "image/gif"
 
 	"github.com/oarkflow/pdf/core"
+	"golang.org/x/image/webp"
 )
 
 // Image holds decoded image data ready for embedding in a PDF.
@@ -100,7 +102,7 @@ func FromGoImage(img goimage.Image) *Image {
 
 // BuildXObject creates a PDF image XObject (and optional SMask) from this Image.
 // Returns the main image object and optionally a soft mask object.
-func (img *Image) BuildXObject(objNum int, smaskObjNum int) (main core.PdfIndirectObject, smask *core.PdfIndirectObject) {
+func (img *Image) BuildXObject(objNum int, smaskObjNum int) (main core.PdfIndirectObject, smask *core.PdfIndirectObject, err error) {
 	var stream *core.PdfStream
 	if img.Filter == "DCTDecode" && img.RawStream != nil {
 		stream = core.NewStream(img.RawStream)
@@ -108,7 +110,9 @@ func (img *Image) BuildXObject(objNum int, smaskObjNum int) (main core.PdfIndire
 		stream.Dictionary.Set("Length", core.PdfInteger(len(img.RawStream)))
 	} else {
 		stream = core.NewStream(img.Data)
-		_ = stream.Compress()
+		if err := stream.Compress(); err != nil {
+			return core.PdfIndirectObject{}, nil, fmt.Errorf("compressing image data: %w", err)
+		}
 	}
 
 	stream.Dictionary.Set("Type", core.PdfName("XObject"))
@@ -121,7 +125,9 @@ func (img *Image) BuildXObject(objNum int, smaskObjNum int) (main core.PdfIndire
 	// Build SMask if alpha data is present.
 	if len(img.AlphaData) > 0 {
 		smaskStream := core.NewStream(img.AlphaData)
-		_ = smaskStream.Compress()
+		if err := smaskStream.Compress(); err != nil {
+			return core.PdfIndirectObject{}, nil, fmt.Errorf("compressing alpha data: %w", err)
+		}
 		smaskStream.Dictionary.Set("Type", core.PdfName("XObject"))
 		smaskStream.Dictionary.Set("Subtype", core.PdfName("Image"))
 		smaskStream.Dictionary.Set("Width", core.PdfInteger(img.Width))
@@ -142,7 +148,7 @@ func (img *Image) BuildXObject(objNum int, smaskObjNum int) (main core.PdfIndire
 		Reference: core.PdfIndirectReference{ObjectNumber: objNum, GenerationNumber: 0},
 		Object:    stream,
 	}
-	return main, smask
+	return main, smask, nil
 }
 
 // Load auto-detects image format from magic bytes and loads accordingly.
@@ -162,7 +168,20 @@ func Load(data []byte) (*Image, error) {
 	if (data[0] == 'I' && data[1] == 'I') || (data[0] == 'M' && data[1] == 'M') {
 		return LoadTIFF(data)
 	}
+	// WebP: starts with RIFF....WEBP
+	if data[0] == 'R' && data[1] == 'I' && data[2] == 'F' && data[3] == 'F' && len(data) > 11 && data[8] == 'W' && data[9] == 'E' && data[10] == 'B' && data[11] == 'P' {
+		return LoadWebP(data)
+	}
 	return nil, fmt.Errorf("unsupported image format")
+}
+
+// LoadWebP decodes a WebP image and returns it as an Image.
+func LoadWebP(data []byte) (*Image, error) {
+	img, err := webp.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("decoding WebP: %w", err)
+	}
+	return FromGoImage(img), nil
 }
 
 // Ensure color is imported (used by FromGoImage indirectly).

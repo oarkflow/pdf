@@ -1,6 +1,7 @@
 package reader
 
 import (
+	"errors"
 	"fmt"
 	"os"
 )
@@ -23,6 +24,9 @@ type Reader struct {
 
 // Open parses the PDF data and returns a Reader.
 func Open(data []byte) (*Reader, error) {
+	if len(data) == 0 {
+		return nil, errors.New("reader: data is empty")
+	}
 	resolver, err := NewResolver(data)
 	if err != nil {
 		return nil, fmt.Errorf("reader: %w", err)
@@ -81,7 +85,10 @@ func (r *Reader) Page(n int) (*PageInfo, error) {
 	info := &PageInfo{}
 
 	// MediaBox.
-	mb := r.inheritedAttr(pageDict, "/MediaBox")
+	mb, err := r.inheritedAttr(pageDict, "/MediaBox")
+	if err != nil {
+		return nil, fmt.Errorf("reader: page %d: resolving /MediaBox: %w", n, err)
+	}
 	if arr, ok := mb.([]interface{}); ok && len(arr) >= 4 {
 		for i := 0; i < 4; i++ {
 			info.MediaBox[i] = toFloat(arr[i])
@@ -89,15 +96,24 @@ func (r *Reader) Page(n int) (*PageInfo, error) {
 	}
 
 	// Rotation.
-	rot := r.inheritedAttr(pageDict, "/Rotate")
+	rot, err := r.inheritedAttr(pageDict, "/Rotate")
+	if err != nil {
+		return nil, fmt.Errorf("reader: page %d: resolving /Rotate: %w", n, err)
+	}
 	if v, ok := rot.(int64); ok {
 		info.Rotation = int(v)
 	}
 
 	// Resources.
-	res := r.inheritedAttr(pageDict, "/Resources")
+	res, err := r.inheritedAttr(pageDict, "/Resources")
+	if err != nil {
+		return nil, fmt.Errorf("reader: page %d: resolving /Resources: %w", n, err)
+	}
 	if resRef, ok := res.(IndirectRef); ok {
-		resolved, _ := r.resolver.ResolveObject(resRef.ObjNum)
+		resolved, err := r.resolver.ResolveObject(resRef.ObjNum)
+		if err != nil {
+			return nil, fmt.Errorf("reader: failed to resolve resources: %w", err)
+		}
 		if d, ok := resolved.(map[string]interface{}); ok {
 			res = d
 		}
@@ -109,7 +125,10 @@ func (r *Reader) Page(n int) (*PageInfo, error) {
 	}
 
 	// Contents.
-	contents, _ := r.resolver.ResolveReference(pageDict["/Contents"])
+	contents, err := r.resolver.ResolveReference(pageDict["/Contents"])
+	if err != nil {
+		return nil, fmt.Errorf("reader: failed to resolve /Contents: %w", err)
+	}
 	if contents != nil {
 		data, err := r.extractContents(contents)
 		if err != nil {
@@ -135,7 +154,10 @@ func (r *Reader) extractContents(contents interface{}) ([]byte, error) {
 		// Array of content streams.
 		var all []byte
 		for _, item := range c {
-			resolved, _ := r.resolver.ResolveReference(item)
+			resolved, err := r.resolver.ResolveReference(item)
+			if err != nil {
+				return nil, fmt.Errorf("reader: failed to resolve content stream item: %w", err)
+			}
 			part, err := r.extractContents(resolved)
 			if err != nil {
 				return nil, err
@@ -236,17 +258,20 @@ func (r *Reader) collectPages(node map[string]interface{}) error {
 	return nil
 }
 
-func (r *Reader) inheritedAttr(pageDict map[string]interface{}, key string) interface{} {
+func (r *Reader) inheritedAttr(pageDict map[string]interface{}, key string) (interface{}, error) {
 	node := pageDict
 	for node != nil {
 		if v, ok := node[key]; ok {
-			resolved, _ := r.resolver.ResolveReference(v)
-			return resolved
+			resolved, err := r.resolver.ResolveReference(v)
+			if err != nil {
+				return nil, fmt.Errorf("reader: failed to resolve inherited attr %s: %w", key, err)
+			}
+			return resolved, nil
 		}
 		parent, _ := node["_parent"].(map[string]interface{})
 		node = parent
 	}
-	return nil
+	return nil, nil
 }
 
 func toFloat(v interface{}) float64 {

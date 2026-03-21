@@ -29,7 +29,10 @@ func parseFontInfo(resolver *Resolver, fontDict map[string]interface{}) (*fontIn
 		fi.isType0 = true
 		// Try to get descendant font info.
 		if descFonts, ok := fontDict["/DescendantFonts"].([]interface{}); ok && len(descFonts) > 0 {
-			descDict := getDict(resolver, descFonts[0])
+			descDict, err := getDict(resolver, descFonts[0])
+			if err != nil {
+				return nil, err
+			}
 			if descDict != nil {
 				if bf := getString(descDict, "/BaseFont"); bf != "" {
 					fi.baseFont = bf
@@ -47,7 +50,10 @@ func parseFontInfo(resolver *Resolver, fontDict map[string]interface{}) (*fontIn
 
 	// ToUnicode CMap.
 	if tuRef, ok := fontDict["/ToUnicode"]; ok {
-		data := getStreamData(resolver, tuRef)
+		data, err := getStreamData(resolver, tuRef)
+		if err != nil {
+			return nil, err
+		}
 		if data != nil {
 			fi.toUnicode = parseToUnicodeCMap(data)
 		}

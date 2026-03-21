@@ -6,7 +6,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
+
+	"github.com/oarkflow/pdf/core"
 )
 
 // DecodeWOFF decompresses WOFF1 data into standard sfnt (TTF/OTF) data.
@@ -109,6 +110,8 @@ func DecodeWOFF(data []byte) ([]byte, error) {
 	}
 
 	// Write table data.
+	const maxTotalDecompressed = 200 * 1024 * 1024 // 200 MB cumulative limit
+	var totalDecompressed uint64
 	for _, t := range tables {
 		tableData := data[t.offset : t.offset+t.compLength]
 		var origData []byte
@@ -119,7 +122,7 @@ func DecodeWOFF(data []byte) ([]byte, error) {
 			if err != nil {
 				return nil, fmt.Errorf("font: zlib decompress table %s: %w", string(t.tag[:]), err)
 			}
-			origData, err = io.ReadAll(r)
+			origData, err = core.LimitedReadAll(r, 50*1024*1024) // 50 MB limit
 			r.Close()
 			if err != nil {
 				return nil, fmt.Errorf("font: zlib read table %s: %w", string(t.tag[:]), err)
@@ -132,6 +135,10 @@ func DecodeWOFF(data []byte) ([]byte, error) {
 		}
 
 		out = append(out, origData...)
+		totalDecompressed += uint64(len(origData))
+		if totalDecompressed > maxTotalDecompressed {
+			return nil, errors.New("font: WOFF total decompressed size exceeds 200MB limit")
+		}
 		// Pad to 4-byte boundary.
 		for len(out)%4 != 0 {
 			out = append(out, 0)

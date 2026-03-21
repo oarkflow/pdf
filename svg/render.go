@@ -345,10 +345,10 @@ func (r *Renderer) renderRect(node *SVGNode) {
 	r.applyTransform(node)
 	paint := r.applyStyle(node)
 
-	x := parseFloatAttr(node, "x", 0)
-	y := parseFloatAttr(node, "y", 0)
-	w := parseFloatAttr(node, "width", 0)
-	h := parseFloatAttr(node, "height", 0)
+	x := r.resolveLength(node, "x", 0, r.viewBoxWidth())
+	y := r.resolveLength(node, "y", 0, r.viewBoxHeight())
+	w := r.resolveLength(node, "width", 0, r.viewBoxWidth())
+	h := r.resolveLength(node, "height", 0, r.viewBoxHeight())
 	rx := parseFloatAttr(node, "rx", 0)
 	ry := parseFloatAttr(node, "ry", 0)
 
@@ -555,6 +555,40 @@ func parseFloatAttr(node *SVGNode, name string, def float64) float64 {
 	return v
 }
 
+// resolveLength parses an SVG length attribute, resolving percentages against
+// the given reference dimension (e.g., viewBox width or height).
+func (r *Renderer) resolveLength(node *SVGNode, name string, def, ref float64) float64 {
+	s := node.Attr(name)
+	if s == "" {
+		return def
+	}
+	s = strings.TrimSpace(s)
+	if strings.HasSuffix(s, "%") {
+		v, err := strconv.ParseFloat(strings.TrimSuffix(s, "%"), 64)
+		if err != nil {
+			return def
+		}
+		return v / 100 * ref
+	}
+	return parseFloatAttr(node, name, def)
+}
+
+// viewBoxWidth returns the effective viewBox width (or renderer width as fallback).
+func (r *Renderer) viewBoxWidth() float64 {
+	if r.viewBox[2] > 0 {
+		return r.viewBox[2]
+	}
+	return r.width
+}
+
+// viewBoxHeight returns the effective viewBox height (or renderer height as fallback).
+func (r *Renderer) viewBoxHeight() float64 {
+	if r.viewBox[3] > 0 {
+		return r.viewBox[3]
+	}
+	return r.height
+}
+
 func parseFloatDefault(s string, def float64) float64 {
 	if s == "" {
 		return def
@@ -568,14 +602,39 @@ func parseFloatDefault(s string, def float64) float64 {
 
 func parseDimension(s string, def float64) float64 {
 	s = strings.TrimSpace(s)
-	s = strings.TrimSuffix(s, "px")
-	s = strings.TrimSuffix(s, "pt")
-	s = strings.TrimSuffix(s, "%")
+	if s == "" {
+		return def
+	}
+	if strings.HasSuffix(s, "%") {
+		v, err := strconv.ParseFloat(strings.TrimSuffix(s, "%"), 64)
+		if err != nil {
+			return def
+		}
+		return def * v / 100
+	}
+	const pxToPt = 0.75
+	units := map[string]float64{
+		"px": pxToPt,
+		"pt": 1,
+		"in": 72,
+		"cm": 28.3465,
+		"mm": 2.83465,
+		"em": 12,
+	}
+	for suffix, factor := range units {
+		if strings.HasSuffix(s, suffix) {
+			v, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(s, suffix)), 64)
+			if err != nil {
+				return def
+			}
+			return v * factor
+		}
+	}
 	v, err := strconv.ParseFloat(s, 64)
 	if err != nil {
 		return def
 	}
-	return v
+	return v * pxToPt
 }
 
 func parsePoints(s string) []float64 {

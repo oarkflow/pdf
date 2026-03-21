@@ -1,5 +1,7 @@
 package barcode
 
+import "fmt"
+
 // GF(256) finite field arithmetic for Reed-Solomon error correction.
 // Uses primitive polynomial 0x11D (x^8 + x^4 + x^3 + x^2 + 1), standard for QR codes.
 
@@ -30,19 +32,19 @@ func gf256Mul(a, b byte) byte {
 	return gf256Exp[int(gf256Log[a])+int(gf256Log[b])]
 }
 
-// gf256Div divides a by b in GF(256). b must be non-zero.
-func gf256Div(a, b byte) byte {
+// gf256Div divides a by b in GF(256). Returns an error if b is zero.
+func gf256Div(a, b byte) (byte, error) {
 	if a == 0 {
-		return 0
+		return 0, nil
 	}
 	if b == 0 {
-		panic("gf256: division by zero")
+		return 0, fmt.Errorf("gf256: division by zero")
 	}
 	diff := int(gf256Log[a]) - int(gf256Log[b])
 	if diff < 0 {
 		diff += 255
 	}
-	return gf256Exp[diff]
+	return gf256Exp[diff], nil
 }
 
 // gf256PolyMul multiplies two polynomials in GF(256).

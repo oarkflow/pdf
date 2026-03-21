@@ -36,6 +36,7 @@ type ComputedStyle struct {
 	MaxWidth      CSSLength
 	MinHeight     CSSLength
 	MaxHeight     CSSLength
+	ObjectFit     string // contain, cover, fill, none, scale-down
 	MarginTop     CSSLength
 	MarginRight   CSSLength
 	MarginBottom  CSSLength
@@ -303,6 +304,8 @@ func (s *ComputedStyle) Apply(properties map[string]CSSValue, parentStyle *Compu
 			s.MinHeight = parseLength(value)
 		case "max-height":
 			s.MaxHeight = parseLength(value)
+		case "object-fit":
+			s.ObjectFit = value
 		case "margin-top":
 			s.MarginTop = parseLength(value)
 		case "margin-right":

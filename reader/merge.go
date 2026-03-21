@@ -33,12 +33,17 @@ func Merge(pdfs [][]byte) ([]byte, error) {
 			}
 
 			suffix := fmt.Sprintf("_doc%d", docIdx)
-			newPage, fontObjNums, imageObjNums := buildMergePage(w, page, suffix, reader)
+			newPage, fontObjNums, imageObjNums, err := buildMergePage(w, page, suffix, reader)
+			if err != nil {
+				return nil, fmt.Errorf("building merge page %d of PDF %d: %w", pageNum, docIdx, err)
+			}
 
 			newPage.Fonts = fontObjNums
 			newPage.Images = imageObjNums
 
-			w.AddPage(newPage)
+			if _, err := w.AddPage(newPage); err != nil {
+				return nil, fmt.Errorf("adding page %d of PDF %d: %w", pageNum, docIdx, err)
+			}
 		}
 	}
 
@@ -68,7 +73,7 @@ func MergeFiles(paths []string, outputPath string) error {
 	return os.WriteFile(outputPath, merged, 0644)
 }
 
-func buildMergePage(w *document.Writer, page *PageInfo, suffix string, reader *Reader) (*document.Page, map[string]int, map[string]layout.ImageEntry) {
+func buildMergePage(w *document.Writer, page *PageInfo, suffix string, reader *Reader) (*document.Page, map[string]int, map[string]layout.ImageEntry, error) {
 	newPage := document.NewPage(document.PageSize{
 		Width:  page.MediaBox[2] - page.MediaBox[0],
 		Height: page.MediaBox[3] - page.MediaBox[1],
@@ -115,11 +120,19 @@ func buildMergePage(w *document.Writer, page *PageInfo, suffix string, reader *R
 			}
 			cleanNew := cleanName + suffix
 
-			xobj, _ := reader.resolver.ResolveReference(xobjRef)
+			xobj, err := reader.resolver.ResolveReference(xobjRef)
+			if err != nil {
+				return nil, nil, nil, fmt.Errorf("reader: merge: failed to resolve XObject %s: %w", name, err)
+			}
 			if so, ok := xobj.(*StreamObject); ok {
-				data, _ := reader.resolver.DecompressStream(so.Dict, so.Data)
+				data, err := reader.resolver.DecompressStream(so.Dict, so.Data)
+				if err != nil {
+					return nil, nil, nil, fmt.Errorf("reader: merge: failed to decompress XObject %s: %w", name, err)
+				}
 				stream := core.NewStream(data)
-				_ = stream.Compress()
+				if err := stream.Compress(); err != nil {
+					return nil, nil, nil, fmt.Errorf("reader: merge: failed to compress XObject %s: %w", name, err)
+				}
 				// Copy relevant dictionary entries.
 				for k, v := range so.Dict {
 					if k == "/Length" || k == "/Filter" {
@@ -137,7 +150,7 @@ func buildMergePage(w *document.Writer, page *PageInfo, suffix string, reader *R
 		}
 	}
 
-	return newPage, fontObjNums, imageObjNums
+	return newPage, fontObjNums, imageObjNums, nil
 }
 
 // rewriteResourceNames appends suffix to font and image name references in a content stream.

@@ -28,23 +28,36 @@ type Color interface {
 // ToRGB returns itself.
 func (c RGB) ToRGB() RGB { return c }
 
+// clamp01 clamps a value to the [0,1] range.
+func clamp01(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
+}
+
 // ToCMYK converts RGB to CMYK.
 func (c RGB) ToCMYK() CMYK {
-	k := 1 - math.Max(c.R, math.Max(c.G, c.B))
+	r, g, b := clamp01(c.R), clamp01(c.G), clamp01(c.B)
+	k := 1 - math.Max(r, math.Max(g, b))
 	if k >= 1 {
 		return CMYK{0, 0, 0, 1}
 	}
 	return CMYK{
-		C: (1 - c.R - k) / (1 - k),
-		M: (1 - c.G - k) / (1 - k),
-		Y: (1 - c.B - k) / (1 - k),
+		C: (1 - r - k) / (1 - k),
+		M: (1 - g - k) / (1 - k),
+		Y: (1 - b - k) / (1 - k),
 		K: k,
 	}
 }
 
 // ToGray converts RGB to Gray using luminance weights.
 func (c RGB) ToGray() Gray {
-	return Gray{0.299*c.R + 0.587*c.G + 0.114*c.B}
+	r, g, b := clamp01(c.R), clamp01(c.G), clamp01(c.B)
+	return Gray{0.299*r + 0.587*g + 0.114*b}
 }
 
 // ToRGB converts CMYK to RGB.
@@ -138,24 +151,44 @@ func FromHex(hex string) (RGB, error) {
 }
 
 func parseHex3(s string) (r, g, b uint8, err error) {
-	var n int
-	_, err = fmt.Sscanf(s, "%1x%1x%1x%n", &r, &g, &b, &n)
-	if err != nil || n != 3 {
+	if len(s) != 3 {
 		return 0, 0, 0, fmt.Errorf("color: invalid hex string %q", s)
 	}
-	r = r*16 + r
-	g = g*16 + g
-	b = b*16 + b
-	return
+	rv, ok1 := hexVal(s[0])
+	gv, ok2 := hexVal(s[1])
+	bv, ok3 := hexVal(s[2])
+	if !ok1 || !ok2 || !ok3 {
+		return 0, 0, 0, fmt.Errorf("color: invalid hex string %q", s)
+	}
+	return rv*16 + rv, gv*16 + gv, bv*16 + bv, nil
 }
 
 func parseHex6(s string) (r, g, b uint8, err error) {
-	var n int
-	_, err = fmt.Sscanf(s, "%2x%2x%2x%n", &r, &g, &b, &n)
-	if err != nil || n != 6 {
+	if len(s) != 6 {
 		return 0, 0, 0, fmt.Errorf("color: invalid hex string %q", s)
 	}
-	return
+	r1, ok1 := hexVal(s[0])
+	r2, ok2 := hexVal(s[1])
+	g1, ok3 := hexVal(s[2])
+	g2, ok4 := hexVal(s[3])
+	b1, ok5 := hexVal(s[4])
+	b2, ok6 := hexVal(s[5])
+	if !ok1 || !ok2 || !ok3 || !ok4 || !ok5 || !ok6 {
+		return 0, 0, 0, fmt.Errorf("color: invalid hex string %q", s)
+	}
+	return r1*16 + r2, g1*16 + g2, b1*16 + b2, nil
+}
+
+func hexVal(c byte) (uint8, bool) {
+	switch {
+	case c >= '0' && c <= '9':
+		return c - '0', true
+	case c >= 'a' && c <= 'f':
+		return c - 'a' + 10, true
+	case c >= 'A' && c <= 'F':
+		return c - 'A' + 10, true
+	}
+	return 0, false
 }
 
 // FromRGBi creates an RGB color from 0-255 integer components.

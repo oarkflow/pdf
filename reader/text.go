@@ -20,10 +20,16 @@ func (r *Reader) ExtractText(pageNum int) (string, error) {
 
 	// Load fonts from page resources.
 	if fontDict, ok := page.Resources["/Font"]; ok {
-		fontMap, _ := r.resolver.ResolveReference(fontDict)
+		fontMap, err := r.resolver.ResolveReference(fontDict)
+		if err != nil {
+			return "", fmt.Errorf("reader: failed to resolve /Font: %w", err)
+		}
 		if fm, ok := fontMap.(map[string]interface{}); ok {
 			for name, ref := range fm {
-				fontObj, _ := r.resolver.ResolveReference(ref)
+				fontObj, err := r.resolver.ResolveReference(ref)
+				if err != nil {
+					return "", fmt.Errorf("reader: failed to resolve font %s: %w", name, err)
+				}
 				if fd, ok := fontObj.(map[string]interface{}); ok {
 					fi, err := parseFontInfo(r.resolver, fd)
 					if err == nil {
@@ -408,19 +414,28 @@ func getFloat(dict map[string]interface{}, key string) float64 {
 }
 
 // Helpers used for font resolution.
-func getDict(resolver *Resolver, v interface{}) map[string]interface{} {
-	v, _ = resolver.ResolveReference(v)
-	d, _ := v.(map[string]interface{})
-	return d
+func getDict(resolver *Resolver, v interface{}) (map[string]interface{}, error) {
+	resolved, err := resolver.ResolveReference(v)
+	if err != nil {
+		return nil, fmt.Errorf("reader: getDict resolve failed: %w", err)
+	}
+	d, _ := resolved.(map[string]interface{})
+	return d, nil
 }
 
-func getStreamData(resolver *Resolver, v interface{}) []byte {
-	v, _ = resolver.ResolveReference(v)
-	if so, ok := v.(*StreamObject); ok {
-		data, _ := resolver.DecompressStream(so.Dict, so.Data)
-		return data
+func getStreamData(resolver *Resolver, v interface{}) ([]byte, error) {
+	resolved, err := resolver.ResolveReference(v)
+	if err != nil {
+		return nil, fmt.Errorf("reader: getStreamData resolve failed: %w", err)
 	}
-	return nil
+	if so, ok := resolved.(*StreamObject); ok {
+		data, err := resolver.DecompressStream(so.Dict, so.Data)
+		if err != nil {
+			return nil, fmt.Errorf("reader: getStreamData decompress failed: %w", err)
+		}
+		return data, nil
+	}
+	return nil, nil
 }
 
 // Exported helper for use in merge.

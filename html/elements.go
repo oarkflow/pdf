@@ -1,12 +1,15 @@
 package html
 
 import (
+	"bytes"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 
 	pdfimage "github.com/oarkflow/pdf/image"
 	"github.com/oarkflow/pdf/layout"
+	"github.com/oarkflow/pdf/svg"
 )
 
 // ParagraphElement renders styled text as a paragraph.
@@ -315,7 +318,7 @@ func (e *TableElement) PlanLayout(area layout.LayoutArea) layout.LayoutPlan {
 			Draw: func(ctx *layout.DrawContext, x, topY float64) {
 				xOff := x + cBm.ContentLeft()
 
-				// Header row background
+				// Row background
 				if len(cRow.Cells) > 0 && cRow.Cells[0].IsHeader {
 					bg := [3]float64{0.243, 0.243, 0.322}
 					if cRow.Style != nil && cRow.Style.BackgroundColor != nil {
@@ -325,16 +328,29 @@ func (e *TableElement) PlanLayout(area layout.LayoutArea) layout.LayoutPlan {
 					}
 					ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f rg %.2f %.2f %.2f %.2f re f\n",
 						bg[0], bg[1], bg[2], xOff, topY-cRowHeight, cTableWidth, cRowHeight))
+				} else if cRow.Style != nil && cRow.Style.BackgroundColor != nil {
+					bg := *cRow.Style.BackgroundColor
+					ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f rg %.2f %.2f %.2f %.2f re f\n",
+						bg[0], bg[1], bg[2], xOff, topY-cRowHeight, cTableWidth, cRowHeight))
 				} else if cRowIdx%2 == 0 {
 					bg := [3]float64{0.973, 0.976, 0.984}
-					if cRow.Style != nil && cRow.Style.BackgroundColor != nil {
-						bg = *cRow.Style.BackgroundColor
-					}
 					ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f rg %.2f %.2f %.2f %.2f re f\n",
 						bg[0], bg[1], bg[2], xOff, topY-cRowHeight, cTableWidth, cRowHeight))
 				}
 
+				// Per-cell background colors
 				cellX := xOff
+				for ci, cell := range cRow.Cells {
+					if cell.Style != nil && cell.Style.BackgroundColor != nil {
+						bg := *cell.Style.BackgroundColor
+						cw := cRowLayout.cells[ci].width
+						ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f rg %.2f %.2f %.2f %.2f re f\n",
+							bg[0], bg[1], bg[2], cellX, topY-cRowHeight, cw, cRowHeight))
+					}
+					cellX += cRowLayout.cells[ci].width
+				}
+
+				cellX = xOff
 				for ci, cell := range cRow.Cells {
 					cellWidth := cRowLayout.cells[ci].width
 					fs := cRowLayout.cells[ci].fs
@@ -447,18 +463,67 @@ func (e *ImageElement) PlanLayout(area layout.LayoutArea) layout.LayoutPlan {
 		contentHeight = area.Height
 	}
 
+	makePlaceholder := func() layout.LayoutPlan {
+		alt := e.Alt
+		w, h := e.computeImageDisplaySize(100, 50, contentWidth, contentHeight)
+		return layout.LayoutPlan{
+			Status:   layout.LayoutFull,
+			Consumed: h + bm.TotalVertical(),
+			Blocks: []layout.PlacedBlock{{
+				X: bm.ContentLeft(), Y: bm.ContentTop(),
+				Width:  w,
+				Height: h,
+				Draw: func(ctx *layout.DrawContext, x, pdfY float64) {
+					// Gray background
+					ctx.WriteString(fmt.Sprintf("0.94 0.94 0.94 rg %.2f %.2f %.2f %.2f re f\n", x, pdfY-h, w, h))
+					// Border
+					ctx.WriteString(fmt.Sprintf("0.8 0.8 0.8 RG 0.5 w %.2f %.2f %.2f %.2f re S\n", x, pdfY-h, w, h))
+					// Alt text
+					if alt != "" {
+						fn := "Helvetica"
+						ensureFont(ctx, fn)
+						ctx.WriteString(fmt.Sprintf("0.5 0.5 0.5 rg BT /%s 8 Tf %.2f %.2f Td (%s) Tj ET\n", fn, x+4, pdfY-h/2-4, escPDF(alt)))
+					}
+				},
+			}},
+		}
+	}
+
 	if e.Fetcher == nil || e.Src == "" {
-		return layout.LayoutPlan{Status: layout.LayoutFull}
+		return makePlaceholder()
 	}
 
 	data, err := e.Fetcher.Fetch(e.Src)
 	if err != nil {
-		return layout.LayoutPlan{Status: layout.LayoutFull}
+		return makePlaceholder()
+	}
+
+	// Detect SVG content and render as vector graphics.
+	if isSVGData(data) {
+		return e.planSVGLayout(data, contentWidth, contentHeight, bm)
 	}
 
 	decoded, err := pdfimage.Load(data)
 	if err != nil {
-		return layout.LayoutPlan{Status: layout.LayoutFull}
+		return makePlaceholder()
+	}
+
+	imgW, imgH := e.computeImageDisplaySize(
+		float64(decoded.Width), float64(decoded.Height),
+		contentWidth, contentHeight,
+	)
+
+	// Map object-fit to layout fit mode.
+	fit := layout.FitContain
+	if e.Style != nil {
+		switch e.Style.ObjectFit {
+		case "cover":
+			fit = layout.FitCover
+		case "fill":
+			fit = layout.FitFill
+		case "none":
+			fit = layout.FitNone
+		}
 	}
 
 	img := &layout.ImageElement{
@@ -466,15 +531,12 @@ func (e *ImageElement) PlanLayout(area layout.LayoutArea) layout.LayoutPlan {
 		Image: layout.ImageEntry{
 			Image: decoded,
 		},
-		OrigW: decoded.Width,
-		OrigH: decoded.Height,
-		Alt:   e.Alt,
-	}
-	if e.Style != nil && !e.Style.Width.IsAuto() && e.Style.Width.Value > 0 {
-		img.Width = e.Style.Width.ToPoints(contentWidth, 12)
-	}
-	if e.Style != nil && !e.Style.Height.IsAuto() && e.Style.Height.Value > 0 {
-		img.Height = e.Style.Height.ToPoints(contentHeight, 12)
+		OrigW:  decoded.Width,
+		OrigH:  decoded.Height,
+		Alt:    e.Alt,
+		Width:  imgW,
+		Height: imgH,
+		Fit:    fit,
 	}
 
 	plan := img.PlanLayout(layout.LayoutArea{Width: contentWidth, Height: contentHeight})
@@ -484,6 +546,211 @@ func (e *ImageElement) PlanLayout(area layout.LayoutArea) layout.LayoutPlan {
 	}
 	plan.Consumed += bm.TotalVertical()
 	return plan
+}
+
+// computeImageDisplaySize resolves CSS width/height/max-width/max-height for an
+// image with the given native dimensions (in points), constrained to the
+// available content area.
+func (e *ImageElement) computeImageDisplaySize(nativeW, nativeH, contentWidth, contentHeight float64) (float64, float64) {
+	if nativeW <= 0 || nativeH <= 0 {
+		nativeW, nativeH = 100, 100
+	}
+	aspect := nativeW / nativeH
+
+	hasW := e.Style != nil && !e.Style.Width.IsAuto() && e.Style.Width.Value > 0
+	hasH := e.Style != nil && !e.Style.Height.IsAuto() && e.Style.Height.Value > 0
+
+	w, h := nativeW, nativeH
+	if hasW {
+		w = e.Style.Width.ToPoints(contentWidth, 12)
+	}
+	if hasH {
+		h = e.Style.Height.ToPoints(contentHeight, 12)
+	}
+
+	// Maintain aspect ratio when only one dimension is specified.
+	if hasW && !hasH {
+		h = w / aspect
+	} else if hasH && !hasW {
+		w = h * aspect
+	}
+
+	// Apply max-width constraint.
+	maxW := contentWidth
+	if e.Style != nil && !e.Style.MaxWidth.IsAuto() && e.Style.MaxWidth.Value > 0 {
+		mw := e.Style.MaxWidth.ToPoints(contentWidth, 12)
+		if mw < maxW {
+			maxW = mw
+		}
+	}
+	if w > maxW {
+		h = h * maxW / w
+		w = maxW
+	}
+
+	// Apply max-height constraint.
+	if e.Style != nil && !e.Style.MaxHeight.IsAuto() && e.Style.MaxHeight.Value > 0 {
+		maxH := e.Style.MaxHeight.ToPoints(contentHeight, 12)
+		if h > maxH {
+			w = w * maxH / h
+			h = maxH
+		}
+	}
+
+	return w, h
+}
+
+// isSVGData checks if the data looks like SVG content.
+func isSVGData(data []byte) bool {
+	header := data
+	if len(header) > 512 {
+		header = header[:512]
+	}
+	trimmed := bytes.TrimSpace(header)
+	return bytes.HasPrefix(trimmed, []byte("<?xml")) ||
+		bytes.HasPrefix(trimmed, []byte("<svg")) ||
+		bytes.Contains(header, []byte("<svg"))
+}
+
+// planSVGLayout parses and renders SVG data as inline vector PDF content.
+func (e *ImageElement) planSVGLayout(data []byte, contentWidth, contentHeight float64, bm layout.BoxModel) layout.LayoutPlan {
+	root, err := svg.Parse(data)
+	if err != nil {
+		return layout.LayoutPlan{Status: layout.LayoutFull}
+	}
+
+	// Extract native SVG dimensions.
+	svgW, svgH := parseSVGDimensions(root)
+	if svgW <= 0 || svgH <= 0 {
+		svgW, svgH = 300, 150 // default fallback
+	}
+
+	// Use shared sizing logic (respects width/height/max-width/max-height/aspect-ratio).
+	displayW, displayH := e.computeImageDisplaySize(svgW, svgH, contentWidth, contentHeight)
+
+	// Render SVG to PDF content stream.
+	renderer := svg.NewRenderer(svgW, svgH)
+	svgContent := renderer.Render(root)
+
+	scaleX := displayW / svgW
+	scaleY := displayH / svgH
+
+	// Handle object-fit for SVG: adjust scale to maintain aspect ratio.
+	objectFit := ""
+	if e.Style != nil {
+		objectFit = e.Style.ObjectFit
+	}
+	// Center offset for cover/contain positioning.
+	offsetX, offsetY := 0.0, 0.0
+	switch objectFit {
+	case "cover":
+		// Scale uniformly using the larger factor; clip the overflow.
+		s := math.Max(scaleX, scaleY)
+		offsetX = (displayW - svgW*s) / 2
+		offsetY = (displayH - svgH*s) / 2
+		scaleX, scaleY = s, s
+	case "contain", "scale-down":
+		// Scale uniformly using the smaller factor; center in the box.
+		s := math.Min(scaleX, scaleY)
+		offsetX = (displayW - svgW*s) / 2
+		offsetY = (displayH - svgH*s) / 2
+		scaleX, scaleY = s, s
+	case "", "fill":
+		// Default: stretch to fill (scaleX/scaleY differ). No offset.
+		// But if only one CSS dimension was set, aspect ratio is already
+		// preserved by computeImageDisplaySize, so this is fine.
+	}
+	block := layout.PlacedBlock{
+		X:      bm.ContentLeft(),
+		Y:      bm.ContentTop(),
+		Width:  displayW,
+		Height: displayH,
+		Draw: func(ctx *layout.DrawContext, x, pdfY float64) {
+			// Save state, set clipping rect to prevent overflow.
+			ctx.WriteString(fmt.Sprintf("q %.2f %.2f %.2f %.2f re W n\n",
+				x, pdfY-displayH, displayW, displayH))
+			// Place the SVG in one matrix so scaling, Y-flip, and object-fit
+			// offsets are applied consistently.
+			ctx.WriteString(fmt.Sprintf("%.4f 0 0 %.4f %.4f %.4f cm\n",
+				scaleX, -scaleY, x+offsetX, pdfY-offsetY))
+			ctx.WriteString(string(svgContent))
+			ctx.WriteString("Q\n")
+		},
+	}
+
+	return layout.LayoutPlan{
+		Status:   layout.LayoutFull,
+		Consumed: displayH + bm.TotalVertical(),
+		Blocks:   []layout.PlacedBlock{block},
+	}
+}
+
+// parseSVGDimensions extracts width and height from an SVG root node in points.
+func parseSVGDimensions(root *svg.SVGNode) (float64, float64) {
+	const pxToPt = 0.75
+
+	w := parseSVGLength(root.Attrs["width"], pxToPt)
+	h := parseSVGLength(root.Attrs["height"], pxToPt)
+	if w > 0 && h > 0 {
+		return w, h
+	}
+
+	// Fall back to viewBox.
+	if vb, ok := root.Attrs["viewBox"]; ok {
+		if _, _, vw, vh, ok := parseSVGViewBox(vb); ok && vw > 0 && vh > 0 {
+			return vw * pxToPt, vh * pxToPt
+		}
+	}
+	return w, h
+}
+
+func parseSVGViewBox(vb string) (minX, minY, width, height float64, ok bool) {
+	parts := strings.Fields(strings.ReplaceAll(vb, ",", " "))
+	if len(parts) != 4 {
+		return 0, 0, 0, 0, false
+	}
+	values := [4]float64{}
+	for i, part := range parts {
+		v, err := strconv.ParseFloat(part, 64)
+		if err != nil {
+			return 0, 0, 0, 0, false
+		}
+		values[i] = v
+	}
+	return values[0], values[1], values[2], values[3], true
+}
+
+// parseSVGLength parses a length value like "200", "200px", "10cm", etc. to points.
+func parseSVGLength(s string, pxToPt float64) float64 {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0
+	}
+	// Strip known unit suffixes.
+	units := map[string]float64{
+		"px": pxToPt,
+		"pt": 1,
+		"in": 72,
+		"cm": 28.3465,
+		"mm": 2.83465,
+		"em": 12,
+	}
+	for suffix, factor := range units {
+		if strings.HasSuffix(s, suffix) {
+			s = strings.TrimSuffix(s, suffix)
+			v, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+			if err != nil {
+				return 0
+			}
+			return v * factor
+		}
+	}
+	// No unit: treat as px.
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0
+	}
+	return v * pxToPt
 }
 
 // HRElement renders a horizontal rule.
@@ -1524,6 +1791,34 @@ func toWinAnsi(s string) string {
 	return b.String()
 }
 
+// roundedRect returns PDF path operators for a rounded rectangle.
+// (x, y) is the bottom-left corner; w and h are width and height; r is the corner radius.
+func roundedRect(x, y, w, h, r float64) string {
+	const kappa = 0.5523
+	k := r * kappa
+	return fmt.Sprintf(
+		"%.2f %.2f m "+
+			"%.2f %.2f l "+
+			"%.2f %.2f %.2f %.2f %.2f %.2f c "+
+			"%.2f %.2f l "+
+			"%.2f %.2f %.2f %.2f %.2f %.2f c "+
+			"%.2f %.2f l "+
+			"%.2f %.2f %.2f %.2f %.2f %.2f c "+
+			"%.2f %.2f l "+
+			"%.2f %.2f %.2f %.2f %.2f %.2f c "+
+			"h ",
+		x+r, y,
+		x+w-r, y,
+		x+w-r+k, y, x+w, y+r-k, x+w, y+r,
+		x+w, y+h-r,
+		x+w, y+h-r+k, x+w-r+k, y+h, x+w-r, y+h,
+		x+r, y+h,
+		x+r-k, y+h, x, y+h-r+k, x, y+h-r,
+		x, y+r,
+		x, y+r-k, x+r-k, y, x+r, y,
+	)
+}
+
 // drawBoxModel draws background and borders.
 func drawBoxModel(ctx *layout.DrawContext, x, topY, width, height float64, bm layout.BoxModel) {
 	if bm.Background != nil {
@@ -1532,29 +1827,70 @@ func drawBoxModel(ctx *layout.DrawContext, x, topY, width, height float64, bm la
 		by := topY - height + bm.MarginBottom
 		bw := width - bm.MarginLeft - bm.MarginRight
 		bh := height - bm.MarginTop - bm.MarginBottom
-		ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f rg %.2f %.2f %.2f %.2f re f\n",
-			bg[0], bg[1], bg[2], bx, by, bw, bh))
+		if bm.BorderRadius > 0 {
+			r := bm.BorderRadius
+			if r > bw/2 {
+				r = bw / 2
+			}
+			if r > bh/2 {
+				r = bh / 2
+			}
+			ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f rg %sf\n",
+				bg[0], bg[1], bg[2], roundedRect(bx, by, bw, bh, r)))
+		} else {
+			ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f rg %.2f %.2f %.2f %.2f re f\n",
+				bg[0], bg[1], bg[2], bx, by, bw, bh))
+		}
 	}
-	if bm.BorderTopWidth > 0 {
-		y := topY - bm.MarginTop
-		ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f RG %.2f w %.2f %.2f m %.2f %.2f l S\n",
-			bm.BorderColor[0], bm.BorderColor[1], bm.BorderColor[2],
-			bm.BorderTopWidth, x+bm.MarginLeft, y, x+width-bm.MarginRight, y))
-	}
-	if bm.BorderBottomWidth > 0 {
-		y := topY - height + bm.MarginBottom
-		ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f RG %.2f w %.2f %.2f m %.2f %.2f l S\n",
-			bm.BorderColor[0], bm.BorderColor[1], bm.BorderColor[2],
-			bm.BorderBottomWidth, x+bm.MarginLeft, y, x+width-bm.MarginRight, y))
-	}
-	if bm.BorderLeftWidth > 0 {
-		ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f RG %.2f w %.2f %.2f m %.2f %.2f l S\n",
-			bm.BorderColor[0], bm.BorderColor[1], bm.BorderColor[2],
-			bm.BorderLeftWidth, x+bm.MarginLeft, topY-bm.MarginTop, x+bm.MarginLeft, topY-height+bm.MarginBottom))
-	}
-	if bm.BorderRightWidth > 0 {
-		ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f RG %.2f w %.2f %.2f m %.2f %.2f l S\n",
-			bm.BorderColor[0], bm.BorderColor[1], bm.BorderColor[2],
-			bm.BorderRightWidth, x+width-bm.MarginRight, topY-bm.MarginTop, x+width-bm.MarginRight, topY-height+bm.MarginBottom))
+	if bm.BorderRadius > 0 {
+		bw := bm.BorderTopWidth
+		if bm.BorderBottomWidth > bw {
+			bw = bm.BorderBottomWidth
+		}
+		if bm.BorderLeftWidth > bw {
+			bw = bm.BorderLeftWidth
+		}
+		if bm.BorderRightWidth > bw {
+			bw = bm.BorderRightWidth
+		}
+		if bw > 0 {
+			bx := x + bm.MarginLeft
+			by := topY - height + bm.MarginBottom
+			bWidth := width - bm.MarginLeft - bm.MarginRight
+			bHeight := height - bm.MarginTop - bm.MarginBottom
+			r := bm.BorderRadius
+			if r > bWidth/2 {
+				r = bWidth / 2
+			}
+			if r > bHeight/2 {
+				r = bHeight / 2
+			}
+			ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f RG %.2f w %sS\n",
+				bm.BorderColor[0], bm.BorderColor[1], bm.BorderColor[2],
+				bw, roundedRect(bx, by, bWidth, bHeight, r)))
+		}
+	} else {
+		if bm.BorderTopWidth > 0 {
+			y := topY - bm.MarginTop
+			ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f RG %.2f w %.2f %.2f m %.2f %.2f l S\n",
+				bm.BorderColor[0], bm.BorderColor[1], bm.BorderColor[2],
+				bm.BorderTopWidth, x+bm.MarginLeft, y, x+width-bm.MarginRight, y))
+		}
+		if bm.BorderBottomWidth > 0 {
+			y := topY - height + bm.MarginBottom
+			ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f RG %.2f w %.2f %.2f m %.2f %.2f l S\n",
+				bm.BorderColor[0], bm.BorderColor[1], bm.BorderColor[2],
+				bm.BorderBottomWidth, x+bm.MarginLeft, y, x+width-bm.MarginRight, y))
+		}
+		if bm.BorderLeftWidth > 0 {
+			ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f RG %.2f w %.2f %.2f m %.2f %.2f l S\n",
+				bm.BorderColor[0], bm.BorderColor[1], bm.BorderColor[2],
+				bm.BorderLeftWidth, x+bm.MarginLeft, topY-bm.MarginTop, x+bm.MarginLeft, topY-height+bm.MarginBottom))
+		}
+		if bm.BorderRightWidth > 0 {
+			ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f RG %.2f w %.2f %.2f m %.2f %.2f l S\n",
+				bm.BorderColor[0], bm.BorderColor[1], bm.BorderColor[2],
+				bm.BorderRightWidth, x+width-bm.MarginRight, topY-bm.MarginTop, x+width-bm.MarginRight, topY-height+bm.MarginBottom))
+		}
 	}
 }

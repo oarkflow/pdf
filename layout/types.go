@@ -1,6 +1,10 @@
 package layout
 
-import pdfimage "github.com/oarkflow/pdf/image"
+import (
+	"fmt"
+
+	pdfimage "github.com/oarkflow/pdf/image"
+)
 
 // LayoutArea represents available space for layout.
 type LayoutArea struct {
@@ -57,6 +61,16 @@ func (ctx *DrawContext) Write(data []byte) { ctx.ContentStream = append(ctx.Cont
 
 // WriteString appends a string as raw content stream operators.
 func (ctx *DrawContext) WriteString(s string) { ctx.ContentStream = append(ctx.ContentStream, s...) }
+
+// BeginMarkedContent writes a BDC operator with the given tag and MCID.
+func (ctx *DrawContext) BeginMarkedContent(tag string, mcid int) {
+	ctx.WriteString(fmt.Sprintf("/%s <</MCID %d>> BDC\n", tag, mcid))
+}
+
+// EndMarkedContent writes an EMC operator.
+func (ctx *DrawContext) EndMarkedContent() {
+	ctx.WriteString("EMC\n")
+}
 
 // FontEntry tracks a font used on a page.
 type FontEntry struct {

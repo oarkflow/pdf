@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"compress/zlib"
 	"fmt"
-	"io"
 	"strconv"
 	"strings"
+	"sync"
+
+	"github.com/oarkflow/pdf/core"
 )
 
 // StreamObject represents a PDF stream (dictionary + decompressed data).
@@ -31,11 +33,17 @@ type XRefEntry struct {
 	StreamIdx  int // index within the object stream
 }
 
+// maxRecursionDepth is the maximum nesting depth for parsing PDF objects.
+// This prevents stack overflow from circular references in malicious PDFs.
+const maxRecursionDepth = 100
+
 // Resolver parses and caches PDF objects from raw bytes.
 type Resolver struct {
 	data  []byte
 	xref  map[int]XRefEntry
 	cache map[int]interface{}
+	mu    sync.RWMutex
+	depth int // current recursion depth
 }
 
 // NewResolver creates a Resolver by parsing the xref table/stream from data.
@@ -336,6 +344,12 @@ func (r *Resolver) parseObjectAt(offset int) interface{} {
 
 // parseObject parses a single PDF object from the tokenizer.
 func (r *Resolver) parseObject(tok *Tokenizer) (interface{}, error) {
+	r.depth++
+	defer func() { r.depth-- }()
+	if r.depth > maxRecursionDepth {
+		return nil, fmt.Errorf("maximum PDF object recursion depth (%d) exceeded", maxRecursionDepth)
+	}
+
 	t, err := tok.Next()
 	if err != nil {
 		return nil, err
@@ -443,8 +457,17 @@ func (r *Resolver) parseObject(tok *Tokenizer) (interface{}, error) {
 
 // ResolveObject resolves an indirect object by object number.
 func (r *Resolver) ResolveObject(objNum int) (interface{}, error) {
+	r.mu.RLock()
 	if cached, ok := r.cache[objNum]; ok {
+		r.mu.RUnlock()
 		return cached, nil
+	}
+	r.mu.RUnlock()
+
+	r.depth++
+	defer func() { r.depth-- }()
+	if r.depth > maxRecursionDepth {
+		return nil, fmt.Errorf("maximum PDF object recursion depth (%d) exceeded", maxRecursionDepth)
 	}
 
 	entry, ok := r.xref[objNum]
@@ -461,12 +484,16 @@ func (r *Resolver) ResolveObject(objNum int) (interface{}, error) {
 		if err != nil {
 			return nil, err
 		}
+		r.mu.Lock()
 		r.cache[objNum] = obj
+		r.mu.Unlock()
 		return obj, nil
 	}
 
 	obj := r.parseObjectAt(int(entry.Offset))
+	r.mu.Lock()
 	r.cache[objNum] = obj
+	r.mu.Unlock()
 	return obj, nil
 }
 
@@ -594,7 +621,7 @@ func flateDecompress(data []byte) ([]byte, error) {
 		return nil, err
 	}
 	defer rd.Close()
-	return io.ReadAll(rd)
+	return core.LimitedReadAll(rd, 100*1024*1024) // 100 MB limit
 }
 
 func asciiHexDecode(data []byte) []byte {

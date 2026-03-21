@@ -2,18 +2,25 @@ package html
 
 import (
 	"encoding/base64"
-	"io"
 	"net/http"
+
+	"github.com/oarkflow/pdf/core"
 	"net/url"
 	"strings"
 	"time"
 )
 
+const (
+	maxCacheEntries = 256
+	maxCacheBytes   = 50 * 1024 * 1024 // 50 MB
+)
+
 // Fetcher handles fetching external resources.
 type Fetcher struct {
-	BaseURL string
-	Client  *http.Client
-	Cache   map[string][]byte
+	BaseURL    string
+	Client     *http.Client
+	Cache      map[string][]byte
+	cacheBytes int
 }
 
 // NewFetcher creates a new resource fetcher.
@@ -47,13 +54,24 @@ func (f *Fetcher) Fetch(rawURL string) ([]byte, error) {
 	}
 	defer resp.Body.Close()
 
-	data, err := io.ReadAll(resp.Body)
+	data, err := core.LimitedReadAll(resp.Body, 10*1024*1024) // 10 MB limit
 	if err != nil {
 		return nil, err
 	}
 
-	f.Cache[resolved] = data
+	f.addToCache(resolved, data)
 	return data, nil
+}
+
+func (f *Fetcher) addToCache(key string, data []byte) {
+	n := len(data)
+	if len(f.Cache) >= maxCacheEntries || f.cacheBytes+n > maxCacheBytes {
+		// Simple eviction: clear everything
+		f.Cache = make(map[string][]byte)
+		f.cacheBytes = 0
+	}
+	f.Cache[key] = data
+	f.cacheBytes += n
 }
 
 // FetchCSS fetches a CSS file and resolves @import directives.

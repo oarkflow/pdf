@@ -220,6 +220,23 @@ func (s *Stream) DrawXObject(name string) {
 	fmt.Fprintf(&s.buf, "/%s Do\n", name)
 }
 
+// Marked content
+
+// BeginMarkedContent writes a BDC operator with a tag and marked content ID.
+func (s *Stream) BeginMarkedContent(tag string, mcid int) {
+	fmt.Fprintf(&s.buf, "/%s <</MCID %d>> BDC\n", tag, mcid)
+}
+
+// BeginMarkedContentBMC writes a BMC operator with just a tag (no properties).
+func (s *Stream) BeginMarkedContentBMC(tag string) {
+	fmt.Fprintf(&s.buf, "/%s BMC\n", tag)
+}
+
+// EndMarkedContent writes an EMC operator.
+func (s *Stream) EndMarkedContent() {
+	fmt.Fprint(&s.buf, "EMC\n")
+}
+
 // Transparency
 
 func (s *Stream) SetExtGState(name string) {

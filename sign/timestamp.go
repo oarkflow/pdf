@@ -5,8 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/asn1"
 	"fmt"
-	"io"
 	"math/big"
+
+	"github.com/oarkflow/pdf/core"
 	"net/http"
 )
 
@@ -75,7 +76,7 @@ func requestTimestamp(tsaURL string, hash []byte) ([]byte, error) {
 		return nil, fmt.Errorf("timestamp: TSA returned status %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := core.LimitedReadAll(resp.Body, 1*1024*1024) // 1 MB limit
 	if err != nil {
 		return nil, fmt.Errorf("timestamp: read response: %w", err)
 	}

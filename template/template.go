@@ -55,7 +55,10 @@ func (t *Template) AddSection(name string, elements ...layout.Element) *Template
 // all {{...}} placeholders in text elements are resolved using Go's
 // text/template syntax.
 func (t *Template) Render(data interface{}) (*document.Document, error) {
-	doc := document.NewDocument(t.pageSize)
+	doc, err := document.NewDocument(t.pageSize)
+	if err != nil {
+		return nil, err
+	}
 	doc.SetMargins(t.margins)
 
 	var allElements []layout.Element

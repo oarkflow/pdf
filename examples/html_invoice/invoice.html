@@ -3,236 +3,91 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Invoice - Order 250326Tanviryzu1038</title>
+    <title>The Sleek Newsletter</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-    <style>
-        /* A4 size in portrait: 210mm x 297mm */
-        @media print {
-            @page {
-                size: A4;
-                margin: 0; /* Remove default margins */
-            }
-            .no-print { display: none; }
-            body {
-                margin: 0;
-                padding: 0;
-                height: 297mm; /* A4 height */
-                width: 210mm; /* A4 width */
-                overflow: hidden;
-            }
-            .min-h-screen {
-                min-height: auto;
-                height: 297mm; /* Fixed to A4 height */
-                width: 210mm;
-                margin: 0 auto;
-                padding: 0;
-                display: block;
-            }
-            .invoice-box {
-                box-shadow: none;
-                border: 1px solid #e5e7eb;
-                height: 287mm; /* Slightly less than A4 to account for border/padding */
-                width: 200mm; /* Slightly less for padding */
-                padding: 5mm; /* Reduced padding */
-                margin: 0 auto;
-                overflow: hidden; /* Prevent overflow */
-                font-size: 12px; /* Base font size for compactness */
-            }
-            /* Compact layout */
-            .invoice-box * {
-                margin-bottom: 0.2rem !important;
-                line-height: 1.1 !important;
-            }
-            .text-3xl { font-size: 1.25rem !important; }
-            .text-xl { font-size: 1rem !important; }
-            .text-lg { font-size: 0.875rem !important; }
-            table { font-size: 0.75rem !important; }
-            th, td { padding: 0.2rem 0.5rem !important; }
-            .mt-6 { margin-top: 0.5rem !important; }
-            .pb-6 { padding-bottom: 0.5rem !important; }
-        }
-        /* Screen styles remain unchanged */
-    </style>
 </head>
 <body class="bg-gray-100 font-sans">
-    <!-- Container -->
-    <div class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
-        <div class="max-w-4xl w-full space-y-8" x-data="invoiceData()">
-            <!-- Invoice Box -->
-            <div class="invoice-box bg-white p-8 rounded-xl shadow-lg">
-                <!-- Header -->
-                <div class="flex justify-between items-center border-b pb-6">
-                    <div>
-                        <h1 class="text-3xl font-bold text-gray-900">Invoice</h1>
-                        <p class="text-gray-600">Order Reference: <span x-text="order.id"></span></p>
-                    </div>
-                    <div class="text-right">
-                        <h2 class="text-xl font-semibold text-gray-900">Your Store</h2>
-                        <p class="text-gray-600">123 Commerce St, Dhaka, Bangladesh</p>
-                        <p class="text-gray-600">support@yourstore.com</p>
-                    </div>
-                </div>
+    <div class="max-w-2xl mx-auto my-8 bg-white shadow-lg">
+        <!-- Header Section -->
+        <div class="bg-gray-900 p-6">
+            <div class="flex justify-between items-center">
+                <img src="https://placehold.co/120x40" alt="Company Logo" class="h-10">
+                <nav class="space-x-4">
+                    <a href="#" class="text-gray-300 hover:text-white text-sm">Website</a>
+                    <a href="#" class="text-gray-300 hover:text-white text-sm">Contact</a>
+                </nav>
+            </div>
+        </div>
 
-                <!-- Billing Information -->
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
-                    <div>
-                        <h3 class="text-lg font-semibold text-gray-900">Billed To</h3>
-                        <p class="text-gray-600" x-text="customer.name"></p>
-                        <p class="text-gray-600" x-text="customer.address"></p>
-                        <p class="text-gray-600">City: <span x-text="customer.city"></span></p>
-                        <p class="text-gray-600">Postal Code: <span x-text="customer.postalCode"></span></p>
-                    </div>
-                    <div class="text-right">
-                        <p class="text-gray-600">Invoice Date: <span x-text="invoiceDate"></span></p>
-                        <p class="text-gray-600">Transaction Date: <span x-text="payment.transactionDate"></span></p>
-                        <p class="text-gray-600">Payment Status: <span class="font-medium" x-text="payment.status"></span></p>
-                    </div>
-                </div>
+        <!-- Main Content -->
+        <div class="p-8">
+            <!-- Featured Article -->
+            <div class="mb-8">
+                <h1 class="text-3xl font-bold text-gray-800 mb-4">Monthly Newsletter</h1>
+                <p class="text-gray-600 mb-4">Stay updated with our latest news and developments</p>
+                <img src="https://placehold.co/600x300" alt="Featured Image" class="w-full h-64 object-cover rounded-lg mb-4">
+                <h2 class="text-xl font-semibold text-gray-800 mb-2">Latest Updates</h2>
+                <p class="text-gray-600 leading-relaxed">
+                    We're excited to share our latest developments and upcoming features. Our team has been working hard to bring you the best experience possible.
+                </p>
+            </div>
 
-                <!-- Order Items -->
-                <div class="mt-6">
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-left">
-                            <thead class="bg-gray-100">
-                                <tr>
-                                    <th class="py-2 px-4 font-semibold text-gray-900">Description</th>
-                                    <th class="py-2 px-4 font-semibold text-gray-900">Qty</th>
-                                    <th class="py-2 px-4 font-semibold text-gray-900">Unit Price</th>
-                                    <th class="py-2 px-4 font-semibold text-gray-900 text-right">Total</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr class="border-b">
-                                    <td class="py-2 px-4">Order #250326Tanviryzu1038</td>
-                                    <td class="py-2 px-4">1</td>
-                                    <td class="py-2 px-4" x-text="order.totalAmount + ' BDT'"></td>
-                                    <td class="py-2 px-4 text-right" x-text="order.totalAmount + ' BDT'"></td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
+            <!-- Article Grid -->
+            <div class="grid md:grid-cols-2 gap-6 mb-8">
+                <div class="bg-gray-50 p-4 rounded-lg">
+                    <img src="https://placehold.co/280x160" alt="Article 1" class="w-full h-40 object-cover rounded mb-4">
+                    <h3 class="text-lg font-semibold text-gray-800 mb-2">Industry Insights</h3>
+                    <p class="text-gray-600">Discover the latest trends and analysis from our expert team.</p>
                 </div>
-
-                <!-- Totals -->
-                <div class="mt-6 flex justify-end">
-                    <div class="w-full md:w-1/3">
-                        <div class="space-y-1">
-                            <div class="flex justify-between">
-                                <span class="text-gray-600">Subtotal</span>
-                                <span x-text="subtotal + ' BDT'"></span>
-                            </div>
-                            <div class="flex justify-between">
-                                <span class="text-gray-600">Tax (0%)</span>
-                                <span>0.00 BDT</span>
-                            </div>
-                            <div class="flex justify-between font-semibold text-lg border-t pt-2">
-                                <span>Total</span>
-                                <span x-text="total + ' BDT'"></span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Payment Information -->
-                <div class="mt-6">
-                    <h3 class="text-lg font-semibold text-gray-900">Payment Information</h3>
-                    <div class="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2 text-gray-600">
-                        <div>
-                            <p>Transaction ID: <span x-text="payment.transactionId"></span></p>
-                            <p>Amount Paid: <span x-text="payment.amountPaid + ' BDT'"></span></p>
-                            <p>Payment Method: <span x-text="payment.cardType"></span></p>
-                        </div>
-                        <div>
-                            <p>Bank Transaction ID: <span x-text="payment.bankTransactionId"></span></p>
-                            <p>Transaction Date: <span x-text="payment.transactionDate"></span></p>
-                            <p>Payment Status: <span class="font-medium" x-text="payment.status"></span></p>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Footer -->
-                <div class="mt-6 text-center text-gray-600">
-                    <p>Thank you for your purchase!</p>
-                    <p>If you have any questions, contact us at support@yourstore.com</p>
+                <div class="bg-gray-50 p-4 rounded-lg">
+                    <img src="https://placehold.co/280x160" alt="Article 2" class="w-full h-40 object-cover rounded mb-4">
+                    <h3 class="text-lg font-semibold text-gray-800 mb-2">Company Culture</h3>
+                    <p class="text-gray-600">Take a peek inside our organization and meet our amazing team.</p>
                 </div>
             </div>
 
-            <!-- Actions -->
-            <div class="flex justify-center gap-4 no-print">
-                <button
-                    @click="window.print()"
-                    class="bg-indigo-600 text-white px-6 py-2 rounded-md hover:bg-indigo-700 transition duration-300"
-                >
-                    Print Invoice
-                </button>
-                <button
-                    @click="downloadPDF()"
-                    class="bg-gray-600 text-white px-6 py-2 rounded-md hover:bg-gray-700 transition duration-300"
-                >
-                    Download PDF
+            <!-- CTA Section -->
+            <div class="bg-blue-50 p-6 rounded-lg text-center mb-8">
+                <h3 class="text-xl font-semibold text-blue-900 mb-2">Ready to Learn More?</h3>
+                <p class="text-blue-700 mb-4">Join our community and stay updated with the latest news.</p>
+                <button class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition duration-300">
+                    Subscribe Now
                 </button>
             </div>
         </div>
+
+        <!-- Footer -->
+        <div class="bg-gray-50 p-6 border-t border-gray-200">
+            <div class="flex flex-col md:flex-row justify-between items-center">
+                <div class="text-gray-600 text-sm mb-4 md:mb-0">
+                    © 2025 Your Company. All rights reserved.
+                </div>
+                <div class="flex space-x-4">
+                    <a href="#" class="text-gray-400 hover:text-gray-600">
+                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M24 4.557c-.883.392-1.832.656-2.828.775 1.017-.609 1.798-1.574 2.165-2.724-.951.564-2.005.974-3.127 1.195-.897-.957-2.178-1.555-3.594-1.555-3.179 0-5.515 2.966-4.797 6.045-4.091-.205-7.719-2.165-10.148-5.144-1.29 2.213-.669 5.108 1.523 6.574-.806-.026-1.566-.247-2.229-.616-.054 2.281 1.581 4.415 3.949 4.89-.693.188-1.452.232-2.224.084.626 1.956 2.444 3.379 4.6 3.419-2.07 1.623-4.678 2.348-7.29 2.04 2.179 1.397 4.768 2.212 7.548 2.212 9.142 0 14.307-7.721 13.995-14.646.962-.695 1.797-1.562 2.457-2.549z"/>
+                        </svg>
+                    </a>
+                    <a href="#" class="text-gray-400 hover:text-gray-600">
+                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M12 0c-6.627 0-12 5.373-12 12s5.373 12 12 12 12-5.373 12-12-5.373-12-12-12zm3 8h-1.35c-.538 0-.65.221-.65.778v1.222h2l-.209 2h-1.791v7h-3v-7h-2v-2h2v-2.308c0-1.769.931-2.692 3.029-2.692h1.971v3z"/>
+                        </svg>
+                    </a>
+                    <a href="#" class="text-gray-400 hover:text-gray-600">
+                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M12 0c-6.627 0-12 5.373-12 12s5.373 12 12 12 12-5.373 12-12-5.373-12-12-12zm-2 16h-2v-6h2v6zm-1-6.891c-.607 0-1.1-.496-1.1-1.109 0-.612.492-1.109 1.1-1.109s1.1.497 1.1 1.109c0 .613-.493 1.109-1.1 1.109zm8 6.891h-1.998v-2.861c0-1.881-2.002-1.722-2.002 0v2.861h-2v-6h2v1.093c.872-1.616 4-1.736 4 1.548v3.359z"/>
+                        </svg>
+                    </a>
+                </div>
+            </div>
+            <div class="mt-4 text-center text-gray-500 text-sm">
+                <p>You received this email because you signed up for our newsletter.</p>
+                <p class="mt-1">
+                    <a href="#" class="text-blue-600 hover:underline">Unsubscribe</a> •
+                    <a href="#" class="text-blue-600 hover:underline">Update Preferences</a>
+                </p>
+            </div>
+        </div>
     </div>
-
-    <script>
-        function invoiceData() {
-            return {
-                order: {
-                    id: '250326Tanviryzu1038',
-                    totalAmount: 364.00
-                },
-                customer: {
-                    name: 'Tanvir Islam',
-                    address: 'Dhaka, Jashore',
-                    city: 'Jashore',
-                    postalCode: '7420'
-                },
-                payment: {
-                    transactionId: '8a4eb0b8e8',
-                    amountPaid: 364.00,
-                    cardType: 'NAGAD-Nagad',
-                    status: 'VALID',
-                    bankTransactionId: '25032714513xgFujK4vGnx8zDD',
-                    transactionDate: '2025-03-27 01:45:13'
-                },
-                invoiceDate: new Date().toLocaleDateString(),
-                get subtotal() {
-                    return this.order.totalAmount;
-                },
-                get tax() {
-                    return 0; // No tax specified
-                },
-                get total() {
-                    return this.subtotal + this.tax;
-                },
-                downloadPDF() {
-                    const { jsPDF } = window.jspdf;
-                    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-                    const invoiceElement = document.querySelector('.invoice-box');
-
-                    html2canvas(invoiceElement, { scale: 2 }).then(canvas => {
-                        const imgData = canvas.toDataURL('image/png');
-                        const imgProps = doc.getImageProperties(imgData);
-                        const pdfWidth = doc.internal.pageSize.getWidth();
-                        const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
-                        const pageHeight = doc.internal.pageSize.getHeight();
-
-                        // Scale to fit one page
-                        let height = pdfHeight;
-                        if (pdfHeight > pageHeight) {
-                            height = pageHeight;
-                        }
-
-                        doc.addImage(imgData, 'PNG', 0, 0, pdfWidth, height);
-                        doc.save(`invoice-${this.order.id}.pdf`);
-                    });
-                }
-            }
-        }
-    </script>
 </body>
 </html>
