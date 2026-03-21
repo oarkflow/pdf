@@ -8,6 +8,8 @@ require (
 	golang.org/x/net v0.52.0
 )
 
+require github.com/oarkflow/fasttpl v0.0.3
+
 require (
 	github.com/dlclark/regexp2 v1.11.4 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect

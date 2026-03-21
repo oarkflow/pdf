@@ -10,6 +10,7 @@ import (
 	"github.com/oarkflow/pdf/html"
 	"github.com/oarkflow/pdf/layout"
 	"github.com/oarkflow/pdf/reader"
+	"github.com/oarkflow/pdf/template"
 )
 
 // Common page sizes re-exported for convenience.
@@ -261,4 +262,56 @@ func fetchHTML(url string) (string, error) {
 		return "", err
 	}
 	return string(data), nil
+}
+
+// FromHTMLTemplate renders an HTML template string using fasttpl (with support
+// for {{ if }}, {{ range }}, filters, nested keys, etc.) and converts the
+// resulting HTML to a PDF file.
+func FromHTMLTemplate(htmlTpl string, data map[string]any, outputPath string, opts ...html.Options) error {
+	if htmlTpl == "" {
+		return errors.New("pdf: HTML template is empty")
+	}
+	if outputPath == "" {
+		return errors.New("pdf: output path is empty")
+	}
+
+	rendered, err := template.RenderHTML(htmlTpl, data)
+	if err != nil {
+		return fmt.Errorf("rendering template: %w", err)
+	}
+	return FromHTML(rendered, outputPath, opts...)
+}
+
+// FromHTMLTemplateFile compiles an HTML template file using fasttpl and
+// converts the rendered HTML to a PDF file.
+func FromHTMLTemplateFile(templatePath string, data map[string]any, outputPath string, opts ...html.Options) error {
+	if templatePath == "" {
+		return errors.New("pdf: template path is empty")
+	}
+	if outputPath == "" {
+		return errors.New("pdf: output path is empty")
+	}
+
+	rendered, err := template.RenderHTMLFile(templatePath, data)
+	if err != nil {
+		return fmt.Errorf("rendering template: %w", err)
+	}
+	return FromHTML(rendered, outputPath, opts...)
+}
+
+// FromHTMLTemplateStreaming renders an HTML template using fasttpl and writes
+// the PDF directly to the writer.
+func FromHTMLTemplateStreaming(htmlTpl string, data map[string]any, out io.Writer, opts ...html.Options) error {
+	if htmlTpl == "" {
+		return errors.New("pdf: HTML template is empty")
+	}
+	if out == nil {
+		return errors.New("pdf: writer is nil")
+	}
+
+	rendered, err := template.RenderHTML(htmlTpl, data)
+	if err != nil {
+		return fmt.Errorf("rendering template: %w", err)
+	}
+	return FromHTMLStreaming(rendered, out, opts...)
 }

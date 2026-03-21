@@ -1,11 +1,12 @@
 package template
 
 import (
-	"bytes"
 	"fmt"
+	"io"
+	"os"
 	"strings"
-	"text/template"
 
+	"github.com/oarkflow/fasttpl"
 	"github.com/oarkflow/pdf/document"
 	"github.com/oarkflow/pdf/layout"
 )
@@ -52,8 +53,8 @@ func (t *Template) AddSection(name string, elements ...layout.Element) *Template
 }
 
 // Render renders the template into a document. If data is non-nil,
-// all {{...}} placeholders in text elements are resolved using Go's
-// text/template syntax.
+// all {{ ... }} placeholders in text elements are resolved using fasttpl,
+// which supports conditions ({{ if }}), ranges ({{ range }}), filters, etc.
 func (t *Template) Render(data interface{}) (*document.Document, error) {
 	doc, err := document.NewDocument(t.pageSize)
 	if err != nil {
@@ -66,7 +67,7 @@ func (t *Template) Render(data interface{}) (*document.Document, error) {
 		allElements = append(allElements, sec.Elements...)
 	}
 
-	// Resolve {{...}} placeholders in text content when data is provided
+	// Resolve {{ ... }} placeholders in text content when data is provided
 	if data != nil {
 		for i, el := range allElements {
 			resolved, err := resolvePlaceholders(el, data)
@@ -98,74 +99,76 @@ func (t *Template) Render(data interface{}) (*document.Document, error) {
 	return doc, nil
 }
 
-// resolveString replaces {{key}} placeholders in s with values from data.
-// Supports map[string]string, map[string]interface{}, and falls back to
-// Go text/template for struct types. Placeholders use simple {{key}} syntax.
+// resolveString replaces {{ ... }} placeholders in s with values from data
+// using fasttpl. Supports conditions, ranges, filters, nested keys, etc.
 func resolveString(s string, data interface{}) (string, error) {
+	return renderWithFasttpl(s, toMap(data))
+}
+
+// renderWithFasttpl compiles and renders a template string using fasttpl.
+// Returns the original string unchanged if it contains no {{ delimiters.
+func renderWithFasttpl(s string, data map[string]any) (string, error) {
 	if !strings.Contains(s, "{{") {
 		return s, nil
 	}
+	tpl, err := fasttpl.Compile(s)
+	if err != nil {
+		return s, fmt.Errorf("fasttpl compile: %w", err)
+	}
+	result, err := tpl.RenderString(data)
+	if err != nil {
+		return s, fmt.Errorf("fasttpl render: %w", err)
+	}
+	return result, nil
+}
 
-	// Try flat map replacement first
+// toMap converts data to map[string]any for fasttpl.
+func toMap(data interface{}) map[string]any {
 	switch m := data.(type) {
+	case map[string]any:
+		return m
 	case map[string]string:
-		return ReplacePlaceholders(s, func(key string) (string, bool) {
-			v, ok := m[key]
-			return v, ok
-		}), nil
-	case map[string]interface{}:
-		return ReplacePlaceholders(s, func(key string) (string, bool) {
-			v, ok := m[key]
-			if !ok {
-				return "", false
-			}
-			return fmt.Sprintf("%v", v), true
-		}), nil
+		result := make(map[string]any, len(m))
+		for k, v := range m {
+			result[k] = v
+		}
+		return result
 	default:
-		// Fall back to Go text/template for struct types (uses {{.Field}} syntax)
-		t, err := template.New("").Parse(s)
-		if err != nil {
-			return s, err
-		}
-		var buf bytes.Buffer
-		if err := t.Execute(&buf, data); err != nil {
-			return s, err
-		}
-		return buf.String(), nil
+		return map[string]any{"data": data}
 	}
 }
 
-// ReplacePlaceholders replaces all {{key}} occurrences in s using the lookup function.
-// Whitespace inside braces is trimmed, so {{ key }} and {{key}} both work.
-func ReplacePlaceholders(s string, lookup func(string) (string, bool)) string {
-	var result strings.Builder
-	for {
-		start := strings.Index(s, "{{")
-		if start == -1 {
-			result.WriteString(s)
-			break
-		}
-		end := strings.Index(s[start:], "}}")
-		if end == -1 {
-			result.WriteString(s)
-			break
-		}
-		end += start
-
-		result.WriteString(s[:start])
-		key := strings.TrimSpace(s[start+2 : end])
-		if val, ok := lookup(key); ok {
-			result.WriteString(val)
-		} else {
-			// Keep unresolved placeholder as-is
-			result.WriteString(s[start : end+2])
-		}
-		s = s[end+2:]
+// RenderHTML compiles an HTML template string with fasttpl and renders it
+// with the given data. Supports {{ if }}, {{ range }}, {{ include }}, filters, etc.
+func RenderHTML(htmlTemplate string, data map[string]any, opts ...fasttpl.Option) (string, error) {
+	tpl, err := fasttpl.Compile(htmlTemplate, opts...)
+	if err != nil {
+		return "", fmt.Errorf("fasttpl compile: %w", err)
 	}
-	return result.String()
+	return tpl.RenderString(data)
 }
 
-// resolvePlaceholders walks a layout element and resolves all {{...}}
+// RenderHTMLFile compiles an HTML template from a file with fasttpl and renders it
+// with the given data. Supports {{ if }}, {{ range }}, {{ include }}, filters, etc.
+func RenderHTMLFile(path string, data map[string]any) (string, error) {
+	// Read the file, apply autoRaw, then compile
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("reading template file: %w", err)
+	}
+	return RenderHTML(string(content), data)
+}
+
+// RenderHTMLTo compiles an HTML template string and writes the result to w.
+func RenderHTMLTo(w io.Writer, htmlTemplate string, data map[string]any, opts ...fasttpl.Option) error {
+	tpl, err := fasttpl.Compile(htmlTemplate, opts...)
+	if err != nil {
+		return fmt.Errorf("fasttpl compile: %w", err)
+	}
+	return tpl.Render(w, data)
+}
+
+// resolvePlaceholders walks a layout element and resolves all {{ ... }}
 // placeholders in its text content using the provided data.
 func resolvePlaceholders(el layout.Element, data interface{}) (layout.Element, error) {
 	switch e := el.(type) {
@@ -259,25 +262,34 @@ func resolvePlaceholders(el layout.Element, data interface{}) (layout.Element, e
 	return el, nil
 }
 
-// ReplaceMap replaces all {{key}} placeholders in s with values from the map.
+// ReplaceMap renders all {{ ... }} expressions in s using fasttpl with the
+// provided map data. Supports conditions, ranges, filters, nested keys, etc.
 func ReplaceMap(s string, data map[string]string) string {
-	return ReplacePlaceholders(s, func(key string) (string, bool) {
-		v, ok := data[key]
-		return v, ok
-	})
+	m := make(map[string]any, len(data))
+	for k, v := range data {
+		m[k] = v
+	}
+	result, err := renderWithFasttpl(s, m)
+	if err != nil {
+		return s // return original on error for backward compat
+	}
+	return result
 }
 
-// FromString processes a Go text/template string with data and returns the result.
-func FromString(tmpl string, data interface{}) (string, error) {
-	t, err := template.New("pdf").Parse(tmpl)
+// ReplaceMapAny renders all {{ ... }} expressions in s using fasttpl with the
+// provided map data. Supports conditions, ranges, filters, nested keys, etc.
+func ReplaceMapAny(s string, data map[string]any) string {
+	result, err := renderWithFasttpl(s, data)
 	if err != nil {
-		return "", err
+		return s
 	}
-	var buf bytes.Buffer
-	if err := t.Execute(&buf, data); err != nil {
-		return "", err
-	}
-	return buf.String(), nil
+	return result
+}
+
+// FromString processes a fasttpl template string with data and returns the result.
+// Supports {{ if }}, {{ range }}, filters, nested keys, etc.
+func FromString(tmpl string, data interface{}) (string, error) {
+	return resolveString(tmpl, data)
 }
 
 // Execute renders the template and saves to the given path.

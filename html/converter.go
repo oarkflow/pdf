@@ -7,6 +7,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/oarkflow/fasttpl"
 	"github.com/oarkflow/pdf/layout"
 	"github.com/oarkflow/pdf/tailwind"
 )
@@ -48,6 +49,10 @@ type Options struct {
 	UserStylesheet    string
 	EnableJavaScript  bool
 	UseTailwind       bool
+	// TemplateData, when non-nil, causes the HTML to be processed as a fasttpl
+	// template before parsing. Supports {{ if }}, {{ range }}, {{ filters }},
+	// nested keys like {{ user.name }}, etc.
+	TemplateData map[string]any
 }
 
 // PageConfig holds page configuration.
@@ -79,6 +84,18 @@ func Convert(htmlString string, opts Options) (*ConvertResult, error) {
 	}
 	if opts.MediaType == "" {
 		opts.MediaType = "print"
+	}
+
+	// Process fasttpl template if TemplateData is provided
+	if opts.TemplateData != nil && strings.Contains(htmlString, "{{") {
+		tpl, err := fasttpl.Compile(htmlString)
+		if err != nil {
+			return nil, fmt.Errorf("compiling template: %w", err)
+		}
+		htmlString, err = tpl.RenderString(opts.TemplateData)
+		if err != nil {
+			return nil, fmt.Errorf("rendering template: %w", err)
+		}
 	}
 
 	// Parse HTML
