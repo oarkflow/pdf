@@ -49,6 +49,7 @@ type DrawContext struct {
 	Fonts         map[string]FontEntry
 	Images        map[string]ImageEntry
 	Links         []LinkAnnotation
+	ExtGStates    map[string]ExtGState
 	PageWidth     float64
 	PageHeight    float64
 }
@@ -58,6 +59,7 @@ func NewDrawContext(pageWidth, pageHeight float64) *DrawContext {
 	return &DrawContext{
 		Fonts:      make(map[string]FontEntry),
 		Images:     make(map[string]ImageEntry),
+		ExtGStates: make(map[string]ExtGState),
 		PageWidth:  pageWidth,
 		PageHeight: pageHeight,
 	}
@@ -84,6 +86,19 @@ func (ctx *DrawContext) AddLink(x1, y1, x2, y2 float64, uri string) {
 	ctx.Links = append(ctx.Links, LinkAnnotation{X1: x1, Y1: y1, X2: x2, Y2: y2, URI: uri})
 }
 
+// EnsureExtGState returns a reusable graphics state resource name for the
+// requested fill/stroke alpha values.
+func (ctx *DrawContext) EnsureExtGState(fillAlpha, strokeAlpha float64) string {
+	for name, gs := range ctx.ExtGStates {
+		if gs.FillAlpha == fillAlpha && gs.StrokeAlpha == strokeAlpha {
+			return name
+		}
+	}
+	name := fmt.Sprintf("GS%d", len(ctx.ExtGStates)+1)
+	ctx.ExtGStates[name] = ExtGState{FillAlpha: fillAlpha, StrokeAlpha: strokeAlpha}
+	return name
+}
+
 // FontEntry tracks a font used on a page.
 type FontEntry struct {
 	PDFName   string // /F1, /F2, etc.
@@ -98,6 +113,12 @@ type ImageEntry struct {
 	Width     int
 	Height    int
 	Image     *pdfimage.Image
+}
+
+// ExtGState tracks a graphics state resource used on a page.
+type ExtGState struct {
+	FillAlpha   float64
+	StrokeAlpha float64
 }
 
 // TextRun represents a styled run of text.
@@ -147,6 +168,9 @@ type BoxModel struct {
 	BorderTopColor, BorderRightColor, BorderBottomColor, BorderLeftColor [3]float64
 	Background                                                           *[3]float64 // nil means transparent
 	BackgroundImage                                                      string
+	BackgroundPosition                                                   string
+	BackgroundSize                                                       string
+	BackgroundRepeat                                                     string
 	BoxShadow                                                            string
 	BorderRadius                                                         float64
 	BorderTopLeftRadius, BorderTopRightRadius                            float64

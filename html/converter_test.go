@@ -182,6 +182,27 @@ func TestConvert_StyleTagAppliesBorderRadiusShorthand(t *testing.T) {
 	}
 }
 
+func TestConvert_StyleTagAppliesBackgroundLonghands(t *testing.T) {
+	html := `<!DOCTYPE html><html><head><style>.hero { background-image: linear-gradient(90deg, #000, #fff); background-position: center top; background-size: 50% 25%; background-repeat: repeat-x; }</style></head><body><div class="hero">Hero</div></body></html>`
+	result, err := Convert(html, Options{})
+	if err != nil {
+		t.Fatalf("Convert() error = %v", err)
+	}
+	div, ok := result.Elements[0].(*DivElement)
+	if !ok {
+		t.Fatalf("element type = %T, want *DivElement", result.Elements[0])
+	}
+	if div.BoxModel.BackgroundPosition != "center top" {
+		t.Fatalf("background-position = %q", div.BoxModel.BackgroundPosition)
+	}
+	if div.BoxModel.BackgroundSize != "50% 25%" {
+		t.Fatalf("background-size = %q", div.BoxModel.BackgroundSize)
+	}
+	if div.BoxModel.BackgroundRepeat != "repeat-x" {
+		t.Fatalf("background-repeat = %q", div.BoxModel.BackgroundRepeat)
+	}
+}
+
 func TestResolveVarReferences(t *testing.T) {
 	tests := []struct {
 		value string

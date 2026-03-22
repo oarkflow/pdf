@@ -31,3 +31,16 @@ func TestFromHTMLStreamingAppliesEncryption(t *testing.T) {
 		t.Fatal("expected AES-128 encryption dictionary")
 	}
 }
+
+func TestFromHTMLStreamingSkipsUnsupportedTailwindShadow(t *testing.T) {
+	var buf bytes.Buffer
+	err := FromHTMLStreaming(`<html><body><div style="width:200px;height:80px;background:#fff;box-shadow:0 10px 15px -3px rgb(0 0 0 / 0.1)">Card</div></body></html>`, &buf)
+	if err != nil {
+		t.Fatalf("FromHTMLStreaming() error = %v", err)
+	}
+
+	pdfData := buf.String()
+	if strings.Contains(pdfData, "/ExtGState") {
+		t.Fatal("expected unsupported blurred shadow to be omitted")
+	}
+}

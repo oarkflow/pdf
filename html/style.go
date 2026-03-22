@@ -65,9 +65,12 @@ type ComputedStyle struct {
 	BorderBottomLeftRadius  float64
 
 	// Background
-	BackgroundColor *[3]float64
-	BackgroundImage string
-	BoxShadow       string
+	BackgroundColor    *[3]float64
+	BackgroundImage    string
+	BackgroundPosition string
+	BackgroundSize     string
+	BackgroundRepeat   string
+	BoxShadow          string
 
 	// Flex
 	FlexDirection  string
@@ -385,6 +388,12 @@ func (s *ComputedStyle) Apply(properties map[string]CSSValue, parentStyle *Compu
 			}
 		case "background-image":
 			s.BackgroundImage = value
+		case "background-position":
+			s.BackgroundPosition = value
+		case "background-size":
+			s.BackgroundSize = value
+		case "background-repeat":
+			s.BackgroundRepeat = value
 		case "box-shadow":
 			s.BoxShadow = value
 		case "flex-direction":
@@ -669,69 +678,87 @@ func parseBorderWidth(s string, parentFontSize, rootFontSize float64) float64 {
 
 // parseColor parses a CSS color value to RGB [0-1].
 func parseColor(s string) ([3]float64, bool) {
+	rgb, _, ok := parseColorWithAlpha(s)
+	return rgb, ok
+}
+
+// parseColorWithAlpha parses a CSS color value to RGB [0-1] plus alpha [0-1].
+func parseColorWithAlpha(s string) ([3]float64, float64, bool) {
 	s = strings.TrimSpace(strings.ToLower(s))
 
 	if s == "transparent" || s == "none" || s == "" || s == "currentcolor" {
-		return [3]float64{}, false
+		return [3]float64{}, 0, false
 	}
 
 	// Named colors
 	if c, ok := namedColors[s]; ok {
-		return c, true
+		return c, 1, true
 	}
 
 	// Hex
 	if strings.HasPrefix(s, "#") {
-		return parseHexColor(s[1:])
+		return parseHexColorWithAlpha(s[1:])
 	}
 
 	// rgb/rgba
 	if strings.HasPrefix(s, "rgb") {
-		return parseRGBFunction(s)
+		return parseRGBFunctionWithAlpha(s)
 	}
 
-	return [3]float64{}, false
+	return [3]float64{}, 0, false
 }
 
 func parseHexColor(hex string) ([3]float64, bool) {
+	rgb, _, ok := parseHexColorWithAlpha(hex)
+	return rgb, ok
+}
+
+func parseHexColorWithAlpha(hex string) ([3]float64, float64, bool) {
 	switch len(hex) {
 	case 3:
 		r, _ := strconv.ParseUint(string(hex[0])+string(hex[0]), 16, 8)
 		g, _ := strconv.ParseUint(string(hex[1])+string(hex[1]), 16, 8)
 		b, _ := strconv.ParseUint(string(hex[2])+string(hex[2]), 16, 8)
-		return [3]float64{float64(r) / 255, float64(g) / 255, float64(b) / 255}, true
+		return [3]float64{float64(r) / 255, float64(g) / 255, float64(b) / 255}, 1, true
 	case 4: // #RGBA
 		r, _ := strconv.ParseUint(string(hex[0])+string(hex[0]), 16, 8)
 		g, _ := strconv.ParseUint(string(hex[1])+string(hex[1]), 16, 8)
 		b, _ := strconv.ParseUint(string(hex[2])+string(hex[2]), 16, 8)
-		return [3]float64{float64(r) / 255, float64(g) / 255, float64(b) / 255}, true
+		a, _ := strconv.ParseUint(string(hex[3])+string(hex[3]), 16, 8)
+		return [3]float64{float64(r) / 255, float64(g) / 255, float64(b) / 255}, float64(a) / 255, true
 	case 6:
 		r, _ := strconv.ParseUint(hex[0:2], 16, 8)
 		g, _ := strconv.ParseUint(hex[2:4], 16, 8)
 		b, _ := strconv.ParseUint(hex[4:6], 16, 8)
-		return [3]float64{float64(r) / 255, float64(g) / 255, float64(b) / 255}, true
+		return [3]float64{float64(r) / 255, float64(g) / 255, float64(b) / 255}, 1, true
 	case 8: // #RRGGBBAA
 		r, _ := strconv.ParseUint(hex[0:2], 16, 8)
 		g, _ := strconv.ParseUint(hex[2:4], 16, 8)
 		b, _ := strconv.ParseUint(hex[4:6], 16, 8)
-		return [3]float64{float64(r) / 255, float64(g) / 255, float64(b) / 255}, true
+		a, _ := strconv.ParseUint(hex[6:8], 16, 8)
+		return [3]float64{float64(r) / 255, float64(g) / 255, float64(b) / 255}, float64(a) / 255, true
 	}
-	return [3]float64{}, false
+	return [3]float64{}, 0, false
 }
 
 func parseRGBFunction(s string) ([3]float64, bool) {
+	rgb, _, ok := parseRGBFunctionWithAlpha(s)
+	return rgb, ok
+}
+
+func parseRGBFunctionWithAlpha(s string) ([3]float64, float64, bool) {
 	// rgb(r, g, b) or rgba(r, g, b, a)
 	start := strings.IndexByte(s, '(')
 	end := strings.LastIndexByte(s, ')')
 	if start < 0 || end < 0 {
-		return [3]float64{}, false
+		return [3]float64{}, 0, false
 	}
 	inner := s[start+1 : end]
 	// Handle both comma and space separated
 	inner = strings.ReplaceAll(inner, "/", ",")
 	parts := strings.FieldsFunc(inner, func(r rune) bool { return r == ',' || r == ' ' })
 	if len(parts) < 3 {
-		return [3]float64{}, false
+		return [3]float64{}, 0, false
 	}
 	var rgb [3]float64
 	for i := 0; i < 3; i++ {
@@ -745,7 +772,19 @@ func parseRGBFunction(s string) ([3]float64, bool) {
 		}
 		rgb[i] = math.Max(0, math.Min(1, rgb[i]))
 	}
-	return rgb, true
+	alpha := 1.0
+	if len(parts) >= 4 {
+		p := strings.TrimSpace(parts[3])
+		if strings.HasSuffix(p, "%") {
+			v, _ := strconv.ParseFloat(strings.TrimSuffix(p, "%"), 64)
+			alpha = v / 100
+		} else {
+			v, _ := strconv.ParseFloat(p, 64)
+			alpha = v
+		}
+		alpha = math.Max(0, math.Min(1, alpha))
+	}
+	return rgb, alpha, true
 }
 
 // namedColors maps CSS named colors to RGB [0-1].

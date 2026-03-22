@@ -119,6 +119,19 @@ func TestParseColor(t *testing.T) {
 	}
 }
 
+func TestParseColorWithAlpha(t *testing.T) {
+	rgb, alpha, ok := parseColorWithAlpha("rgb(0 0 0 / 0.1)")
+	if !ok {
+		t.Fatal("expected color to parse")
+	}
+	if rgb != [3]float64{0, 0, 0} {
+		t.Fatalf("rgb = %v, want black", rgb)
+	}
+	if math.Abs(alpha-0.1) > 0.001 {
+		t.Fatalf("alpha = %v, want 0.1", alpha)
+	}
+}
+
 func TestParseFontWeight(t *testing.T) {
 	tests := []struct {
 		input string
@@ -233,6 +246,26 @@ func TestApply_ResolvesGradientAndShadowVariables(t *testing.T) {
 	}
 	if s.BoxShadow != "0 10px 15px -3px rgba(0, 0, 0, 0.1)" {
 		t.Fatalf("BoxShadow = %q", s.BoxShadow)
+	}
+}
+
+func TestApply_BackgroundLonghands(t *testing.T) {
+	s := NewDefaultStyle()
+	s.Apply(map[string]CSSValue{
+		"background-image":    {Value: "linear-gradient(90deg, #000, #fff)"},
+		"background-position": {Value: "center top"},
+		"background-size":     {Value: "50% 25%"},
+		"background-repeat":   {Value: "repeat-x"},
+	}, nil, 12)
+
+	if s.BackgroundPosition != "center top" {
+		t.Fatalf("BackgroundPosition = %q", s.BackgroundPosition)
+	}
+	if s.BackgroundSize != "50% 25%" {
+		t.Fatalf("BackgroundSize = %q", s.BackgroundSize)
+	}
+	if s.BackgroundRepeat != "repeat-x" {
+		t.Fatalf("BackgroundRepeat = %q", s.BackgroundRepeat)
 	}
 }
 

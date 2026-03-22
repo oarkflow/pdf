@@ -111,6 +111,23 @@ func TestParseInlineStyle_PreservesComplexValues(t *testing.T) {
 	}
 }
 
+func TestExpandBackgroundShorthand_ExtractsPositionSizeAndRepeat(t *testing.T) {
+	props := ParseInlineStyle("background: linear-gradient(90deg, #000, #fff) center / 50% 25% repeat-x")
+
+	if props["background-image"].Value != "linear-gradient(90deg, #000, #fff)" {
+		t.Fatalf("background-image = %q", props["background-image"].Value)
+	}
+	if props["background-position"].Value != "center" {
+		t.Fatalf("background-position = %q", props["background-position"].Value)
+	}
+	if props["background-size"].Value != "50% 25%" {
+		t.Fatalf("background-size = %q", props["background-size"].Value)
+	}
+	if props["background-repeat"].Value != "repeat-x" {
+		t.Fatalf("background-repeat = %q", props["background-repeat"].Value)
+	}
+}
+
 func TestExpandShorthand_Margin(t *testing.T) {
 	tests := []struct {
 		value string

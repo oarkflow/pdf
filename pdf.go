@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/oarkflow/pdf/core"
 	"github.com/oarkflow/pdf/document"
 	"github.com/oarkflow/pdf/html"
 	"github.com/oarkflow/pdf/layout"
@@ -49,6 +50,7 @@ func Quick(text string, outputPath string) error {
 		for name, ie := range pr.Images {
 			p.Images[name] = ie
 		}
+		applyExtGStates(p, pr.ExtGStates)
 		p.Annotations = pr.Links
 		doc.AddPage(p)
 	}
@@ -111,6 +113,7 @@ func FromHTML(htmlContent string, outputPath string, opts ...html.Options) error
 		for name, ie := range pr.Images {
 			p.Images[name] = ie
 		}
+		applyExtGStates(p, pr.ExtGStates)
 		p.Annotations = pr.Links
 		doc.AddPage(p)
 	}
@@ -204,11 +207,27 @@ func FromHTMLStreaming(htmlContent string, out io.Writer, opts ...html.Options) 
 		for name, ie := range pr.Images {
 			p.Images[name] = ie
 		}
+		applyExtGStates(p, pr.ExtGStates)
 		p.Annotations = pr.Links
 		doc.AddPage(p)
 	}
 
 	return doc.WriteStreamingTo(out)
+}
+
+func applyExtGStates(page *document.Page, states map[string]layout.ExtGState) {
+	if page == nil || len(states) == 0 {
+		return
+	}
+	gsDict := core.NewDictionary()
+	for name, gs := range states {
+		d := core.NewDictionary()
+		d.Set("Type", core.PdfName("ExtGState"))
+		d.Set("ca", core.PdfNumber(gs.FillAlpha))
+		d.Set("CA", core.PdfNumber(gs.StrokeAlpha))
+		gsDict.Set(name, d)
+	}
+	page.Resources.Set("ExtGState", gsDict)
 }
 
 // FromURL fetches a webpage by URL and converts it to a PDF file.

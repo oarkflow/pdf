@@ -2181,42 +2181,27 @@ func drawLinearGradientBackground(ctx *layout.DrawContext, x, y, width, height f
 		defer ctx.WriteString("Q\n")
 	}
 
-	steps := 24
-	switch direction {
-	case "horizontal":
-		stepWidth := width / float64(steps)
-		for i := 0; i < steps; i++ {
-			t := float64(i) / float64(steps-1)
-			c := interpolateColor(startColor, endColor, t)
-			segX := x + stepWidth*float64(i)
-			segW := stepWidth
-			if i == steps-1 {
-				segW = x + width - segX
-			}
-			ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f rg %.2f %.2f %.2f %.2f re f\n",
-				c[0], c[1], c[2], segX, y, segW, height))
-		}
-	default:
-		stepHeight := height / float64(steps)
-		for i := 0; i < steps; i++ {
-			t := float64(i) / float64(steps-1)
-			c := interpolateColor(startColor, endColor, t)
-			segY := y + stepHeight*float64(i)
-			segH := stepHeight
-			if i == steps-1 {
-				segH = y + height - segY
-			}
-			ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f rg %.2f %.2f %.2f %.2f re f\n",
-				c[0], c[1], c[2], x, segY, width, segH))
-		}
+	tileWidth, tileHeight := resolveBackgroundSize(width, height, bm.BackgroundSize)
+	if tileWidth <= 0 {
+		tileWidth = width
+	}
+	if tileHeight <= 0 {
+		tileHeight = height
+	}
+	baseX, baseY := resolveBackgroundPosition(x, y, width, height, tileWidth, tileHeight, bm.BackgroundPosition)
+	for _, tile := range resolveBackgroundTiles(x, y, width, height, tileWidth, tileHeight, baseX, baseY, bm.BackgroundRepeat) {
+		drawLinearGradientTile(ctx, tile.x, tile.y, tile.width, tile.height, direction, startColor, endColor)
 	}
 
 	return true
 }
 
 func drawBoxShadow(ctx *layout.DrawContext, x, y, width, height float64, bm layout.BoxModel) {
-	offsetX, offsetY, blur, spread, color, ok := parseBoxShadow(bm.BoxShadow)
+	offsetX, offsetY, blur, spread, color, alpha, ok := parseBoxShadow(bm.BoxShadow)
 	if !ok {
+		return
+	}
+	if !shouldRenderBoxShadow(bm.BoxShadow, blur, spread, alpha) {
 		return
 	}
 	expand := spread + blur*0.5
@@ -2424,24 +2409,26 @@ func interpolateColor(start, end [3]float64, t float64) [3]float64 {
 	}
 }
 
-func parseBoxShadow(value string) (float64, float64, float64, float64, [3]float64, bool) {
+func parseBoxShadow(value string) (float64, float64, float64, float64, [3]float64, float64, bool) {
 	layer := strings.TrimSpace(firstTopLevelCSSLayer(value))
 	if layer == "" || strings.EqualFold(layer, "none") {
-		return 0, 0, 0, 0, [3]float64{}, false
+		return 0, 0, 0, 0, [3]float64{}, 0, false
 	}
 	parts := splitCSSValues(layer)
 	if len(parts) < 2 {
-		return 0, 0, 0, 0, [3]float64{}, false
+		return 0, 0, 0, 0, [3]float64{}, 0, false
 	}
 	color := [3]float64{0.75, 0.75, 0.75}
+	alpha := 1.0
 	var lengths []float64
 	for _, part := range parts {
 		lower := strings.ToLower(part)
 		if lower == "inset" {
-			return 0, 0, 0, 0, [3]float64{}, false
+			return 0, 0, 0, 0, [3]float64{}, 0, false
 		}
-		if c, ok := parseColor(part); ok {
+		if c, a, ok := parseColorWithAlpha(part); ok {
 			color = c
+			alpha = a
 			continue
 		}
 		length := parseLength(part)
@@ -2450,7 +2437,7 @@ func parseBoxShadow(value string) (float64, float64, float64, float64, [3]float6
 		}
 	}
 	if len(lengths) < 2 {
-		return 0, 0, 0, 0, [3]float64{}, false
+		return 0, 0, 0, 0, [3]float64{}, 0, false
 	}
 	blur := 0.0
 	spread := 0.0
@@ -2460,5 +2447,210 @@ func parseBoxShadow(value string) (float64, float64, float64, float64, [3]float6
 	if len(lengths) > 3 {
 		spread = lengths[3]
 	}
-	return lengths[0], lengths[1], blur, spread, color, true
+	return lengths[0], lengths[1], blur, spread, color, alpha, true
+}
+
+func shouldRenderBoxShadow(value string, blur, spread, alpha float64) bool {
+	if len(splitTopLevelCSV(value)) > 1 {
+		return false
+	}
+	if blur != 0 || spread != 0 {
+		return false
+	}
+	if alpha != 1 {
+		return false
+	}
+	return true
+}
+
+type backgroundTile struct {
+	x, y, width, height float64
+}
+
+func drawLinearGradientTile(ctx *layout.DrawContext, x, y, width, height float64, direction string, startColor, endColor [3]float64) {
+	steps := 24
+	switch direction {
+	case "horizontal":
+		stepWidth := width / float64(steps)
+		for i := 0; i < steps; i++ {
+			t := float64(i) / float64(steps-1)
+			c := interpolateColor(startColor, endColor, t)
+			segX := x + stepWidth*float64(i)
+			segW := stepWidth
+			if i == steps-1 {
+				segW = x + width - segX
+			}
+			ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f rg %.2f %.2f %.2f %.2f re f\n",
+				c[0], c[1], c[2], segX, y, segW, height))
+		}
+	default:
+		stepHeight := height / float64(steps)
+		for i := 0; i < steps; i++ {
+			t := float64(i) / float64(steps-1)
+			c := interpolateColor(startColor, endColor, t)
+			segY := y + stepHeight*float64(i)
+			segH := stepHeight
+			if i == steps-1 {
+				segH = y + height - segY
+			}
+			ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f rg %.2f %.2f %.2f %.2f re f\n",
+				c[0], c[1], c[2], x, segY, width, segH))
+		}
+	}
+}
+
+func resolveBackgroundSize(containerWidth, containerHeight float64, value string) (float64, float64) {
+	value = strings.TrimSpace(strings.ToLower(value))
+	if value == "" || value == "auto" || value == "cover" || value == "contain" {
+		return containerWidth, containerHeight
+	}
+	parts := splitCSSValues(value)
+	if len(parts) == 0 {
+		return containerWidth, containerHeight
+	}
+	width := resolveBackgroundSizeValue(parts[0], containerWidth, containerWidth)
+	height := containerHeight
+	if len(parts) > 1 {
+		height = resolveBackgroundSizeValue(parts[1], containerHeight, containerHeight)
+	}
+	if width <= 0 {
+		width = containerWidth
+	}
+	if height <= 0 {
+		height = containerHeight
+	}
+	return width, height
+}
+
+func resolveBackgroundSizeValue(token string, containerSize, fallback float64) float64 {
+	token = strings.TrimSpace(strings.ToLower(token))
+	switch token {
+	case "", "auto", "cover", "contain":
+		return fallback
+	default:
+		length := parseLength(token)
+		if length.Unit == "%" {
+			return length.Value / 100 * containerSize
+		}
+		val := length.ToPoints(containerSize, containerSize)
+		if val > 0 || token == "0" {
+			return val
+		}
+		return fallback
+	}
+}
+
+func resolveBackgroundPosition(x, y, containerWidth, containerHeight, tileWidth, tileHeight float64, value string) (float64, float64) {
+	offsetX, offsetY := resolveBackgroundOffsets(containerWidth, containerHeight, tileWidth, tileHeight, value)
+	return x + offsetX, y + offsetY
+}
+
+func resolveBackgroundOffsets(containerWidth, containerHeight, tileWidth, tileHeight float64, value string) (float64, float64) {
+	parts := splitCSSValues(strings.TrimSpace(strings.ToLower(value)))
+	if len(parts) == 0 {
+		return 0, containerHeight - tileHeight
+	}
+	if len(parts) == 1 {
+		if isVerticalPositionKeyword(parts[0]) {
+			return computeBackgroundPositionValue("center", containerWidth, tileWidth, false), computeBackgroundPositionValue(parts[0], containerHeight, tileHeight, true)
+		}
+		return computeBackgroundPositionValue(parts[0], containerWidth, tileWidth, false), computeBackgroundPositionValue("center", containerHeight, tileHeight, true)
+	}
+	first, second := parts[0], parts[1]
+	if isVerticalPositionKeyword(first) && !isVerticalPositionKeyword(second) {
+		first, second = second, first
+	}
+	return computeBackgroundPositionValue(first, containerWidth, tileWidth, false), computeBackgroundPositionValue(second, containerHeight, tileHeight, true)
+}
+
+func computeBackgroundPositionValue(token string, containerSize, tileSize float64, vertical bool) float64 {
+	token = strings.TrimSpace(strings.ToLower(token))
+	available := containerSize - tileSize
+	switch token {
+	case "left":
+		return 0
+	case "center":
+		return available / 2
+	case "right":
+		return available
+	case "top":
+		if vertical {
+			return available
+		}
+		return 0
+	case "bottom":
+		if vertical {
+			return 0
+		}
+		return available
+	}
+	length := parseLength(token)
+	if length.Unit == "%" {
+		return available * (length.Value / 100)
+	}
+	return length.ToPoints(containerSize, containerSize)
+}
+
+func resolveBackgroundTiles(x, y, width, height, tileWidth, tileHeight, baseX, baseY float64, repeat string) []backgroundTile {
+	repeat = strings.TrimSpace(strings.ToLower(repeat))
+	if repeat == "" {
+		repeat = "repeat"
+	}
+	repeatX := repeat == "repeat" || repeat == "repeat-x" || repeat == "round" || repeat == "space"
+	repeatY := repeat == "repeat" || repeat == "repeat-y" || repeat == "round" || repeat == "space"
+	if repeat == "no-repeat" {
+		repeatX = false
+		repeatY = false
+	}
+
+	startX := baseX
+	endX := baseX
+	startY := baseY
+	endY := baseY
+	if repeatX && tileWidth > 0 {
+		for startX > x {
+			startX -= tileWidth
+		}
+		for endX+tileWidth < x+width {
+			endX += tileWidth
+		}
+	}
+	if repeatY && tileHeight > 0 {
+		for startY > y {
+			startY -= tileHeight
+		}
+		for endY+tileHeight < y+height {
+			endY += tileHeight
+		}
+	}
+
+	var tiles []backgroundTile
+	for tx := startX; tx <= endX+0.01; tx += tileWidth {
+		if !repeatX && tx > startX {
+			break
+		}
+		for ty := startY; ty <= endY+0.01; ty += tileHeight {
+			if !repeatY && ty > startY {
+				break
+			}
+			clipX1 := math.Max(tx, x)
+			clipY1 := math.Max(ty, y)
+			clipX2 := math.Min(tx+tileWidth, x+width)
+			clipY2 := math.Min(ty+tileHeight, y+height)
+			if clipX2 <= clipX1 || clipY2 <= clipY1 {
+				continue
+			}
+			tiles = append(tiles, backgroundTile{x: clipX1, y: clipY1, width: clipX2 - clipX1, height: clipY2 - clipY1})
+		}
+	}
+	return tiles
+}
+
+func isVerticalPositionKeyword(token string) bool {
+	switch strings.TrimSpace(strings.ToLower(token)) {
+	case "top", "bottom":
+		return true
+	default:
+		return false
+	}
 }

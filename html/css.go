@@ -523,16 +523,25 @@ func expandBackgroundShorthand(val CSSValue, result map[string]CSSValue) {
 	if v == "" {
 		return
 	}
-	if color := extractBackgroundColor(v); color != "" {
+	layer := strings.TrimSpace(firstTopLevelCSSLayer(v))
+	if color := extractBackgroundColor(layer); color != "" {
 		result["background-color"] = CSSValue{Value: color, Priority: val.Priority}
 	}
-	lower := strings.ToLower(v)
-	if strings.Contains(lower, "gradient(") || strings.Contains(lower, "url(") {
-		result["background-image"] = CSSValue{Value: v, Priority: val.Priority}
+	if position := extractBackgroundPosition(layer); position != "" {
+		result["background-position"] = CSSValue{Value: position, Priority: val.Priority}
+	}
+	if size := extractBackgroundSize(layer); size != "" {
+		result["background-size"] = CSSValue{Value: size, Priority: val.Priority}
+	}
+	if repeat := extractBackgroundRepeat(layer); repeat != "" {
+		result["background-repeat"] = CSSValue{Value: repeat, Priority: val.Priority}
+	}
+	if image := extractBackgroundImage(layer); image != "" {
+		result["background-image"] = CSSValue{Value: image, Priority: val.Priority}
 		return
 	}
 	if _, ok := result["background-color"]; !ok {
-		result["background-color"] = CSSValue{Value: v, Priority: val.Priority}
+		result["background-color"] = CSSValue{Value: layer, Priority: val.Priority}
 	}
 }
 
@@ -549,6 +558,156 @@ func extractBackgroundColor(v string) string {
 		}
 	}
 	return ""
+}
+
+func extractBackgroundImage(v string) string {
+	for _, part := range splitCSSValues(v) {
+		if isBackgroundImageToken(strings.ToLower(strings.TrimSpace(part))) {
+			return strings.TrimSpace(part)
+		}
+	}
+	return ""
+}
+
+func extractBackgroundPosition(v string) string {
+	positionPart, _ := splitBackgroundPositionSize(v)
+	positionTokens := filterBackgroundPositionTokens(splitCSSValues(positionPart))
+	if len(positionTokens) == 0 {
+		return ""
+	}
+	return strings.Join(positionTokens, " ")
+}
+
+func extractBackgroundSize(v string) string {
+	_, sizePart := splitBackgroundPositionSize(v)
+	sizeTokens := filterBackgroundSizeTokens(splitCSSValues(sizePart))
+	if len(sizeTokens) == 0 {
+		return ""
+	}
+	return strings.Join(sizeTokens, " ")
+}
+
+func extractBackgroundRepeat(v string) string {
+	for _, part := range splitCSSValues(v) {
+		switch strings.ToLower(strings.TrimSpace(part)) {
+		case "repeat", "repeat-x", "repeat-y", "no-repeat", "space", "round":
+			return strings.ToLower(strings.TrimSpace(part))
+		}
+	}
+	return ""
+}
+
+func splitBackgroundPositionSize(v string) (string, string) {
+	depth := 0
+	var quote byte
+	for i := 0; i < len(v); i++ {
+		if quote != 0 {
+			if v[i] == '\\' && i+1 < len(v) {
+				i++
+				continue
+			}
+			if v[i] == quote {
+				quote = 0
+			}
+			continue
+		}
+		switch v[i] {
+		case '"', '\'':
+			quote = v[i]
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		case '/':
+			if depth == 0 {
+				return strings.TrimSpace(v[:i]), strings.TrimSpace(v[i+1:])
+			}
+		}
+	}
+	return strings.TrimSpace(v), ""
+}
+
+func filterBackgroundPositionTokens(parts []string) []string {
+	var out []string
+	for _, part := range parts {
+		lower := strings.ToLower(strings.TrimSpace(part))
+		if lower == "" || isBackgroundImageToken(lower) || isBackgroundColorToken(lower) || isBackgroundRepeatToken(lower) ||
+			isBackgroundAttachmentToken(lower) || isBackgroundOriginOrClipToken(lower) {
+			continue
+		}
+		if isBackgroundPositionToken(lower) {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+func filterBackgroundSizeTokens(parts []string) []string {
+	var out []string
+	for _, part := range parts {
+		lower := strings.ToLower(strings.TrimSpace(part))
+		if isBackgroundSizeToken(lower) {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+func isBackgroundImageToken(v string) bool {
+	return strings.Contains(v, "gradient(") || strings.HasPrefix(v, "url(")
+}
+
+func isBackgroundColorToken(v string) bool {
+	return isColor(v) || strings.HasPrefix(v, "#") || strings.HasPrefix(v, "rgb") || strings.HasPrefix(v, "hsl")
+}
+
+func isBackgroundRepeatToken(v string) bool {
+	switch v {
+	case "repeat", "repeat-x", "repeat-y", "no-repeat", "space", "round":
+		return true
+	default:
+		return false
+	}
+}
+
+func isBackgroundAttachmentToken(v string) bool {
+	switch v {
+	case "scroll", "fixed", "local":
+		return true
+	default:
+		return false
+	}
+}
+
+func isBackgroundOriginOrClipToken(v string) bool {
+	switch v {
+	case "border-box", "padding-box", "content-box", "text":
+		return true
+	default:
+		return false
+	}
+}
+
+func isBackgroundPositionToken(v string) bool {
+	switch v {
+	case "left", "center", "right", "top", "bottom":
+		return true
+	default:
+		l := parseLength(v)
+		return l.Unit != "" || v == "0"
+	}
+}
+
+func isBackgroundSizeToken(v string) bool {
+	switch v {
+	case "auto", "cover", "contain":
+		return true
+	default:
+		l := parseLength(v)
+		return l.Unit != "" || v == "0"
+	}
 }
 
 func expandFontShorthand(val CSSValue, result map[string]CSSValue) {

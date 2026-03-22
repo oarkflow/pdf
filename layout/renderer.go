@@ -4,12 +4,13 @@ import "fmt"
 
 // PageResult holds the rendered output for a single page.
 type PageResult struct {
-	Content []byte
-	Fonts   map[string]FontEntry
-	Images  map[string]ImageEntry
-	Links   []LinkAnnotation
-	Width   float64
-	Height  float64
+	Content    []byte
+	Fonts      map[string]FontEntry
+	Images     map[string]ImageEntry
+	Links      []LinkAnnotation
+	ExtGStates map[string]ExtGState
+	Width      float64
+	Height     float64
 }
 
 // RenderPages takes a list of elements and renders them across pages.
@@ -25,12 +26,13 @@ func RenderPages(elements []Element, pageWidth, pageHeight, marginTop, marginRig
 	startNewPage := func() {
 		if currentCtx != nil {
 			pages = append(pages, PageResult{
-				Content: currentCtx.ContentStream,
-				Fonts:   currentCtx.Fonts,
-				Images:  currentCtx.Images,
-				Links:   currentCtx.Links,
-				Width:   pageWidth,
-				Height:  pageHeight,
+				Content:    currentCtx.ContentStream,
+				Fonts:      currentCtx.Fonts,
+				Images:     currentCtx.Images,
+				Links:      currentCtx.Links,
+				ExtGStates: currentCtx.ExtGStates,
+				Width:      pageWidth,
+				Height:     pageHeight,
 			})
 		}
 		currentCtx = NewDrawContext(pageWidth, pageHeight)
@@ -109,12 +111,13 @@ func RenderPages(elements []Element, pageWidth, pageHeight, marginTop, marginRig
 	// Flush last page
 	if currentCtx != nil && (len(currentCtx.ContentStream) > 0 || len(pages) == 0) {
 		pages = append(pages, PageResult{
-			Content: currentCtx.ContentStream,
-			Fonts:   currentCtx.Fonts,
-			Images:  currentCtx.Images,
-			Links:   currentCtx.Links,
-			Width:   pageWidth,
-			Height:  pageHeight,
+			Content:    currentCtx.ContentStream,
+			Fonts:      currentCtx.Fonts,
+			Images:     currentCtx.Images,
+			Links:      currentCtx.Links,
+			ExtGStates: currentCtx.ExtGStates,
+			Width:      pageWidth,
+			Height:     pageHeight,
 		})
 	}
 

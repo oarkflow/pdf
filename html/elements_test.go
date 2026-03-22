@@ -242,11 +242,11 @@ func TestDrawBoxModelFallsBackForAsymmetricRoundedBorders(t *testing.T) {
 	}
 }
 
-func TestDrawBoxModelRendersGradientAndShadow(t *testing.T) {
+func TestDrawBoxModelRendersGradientAndSimpleShadow(t *testing.T) {
 	ctx := layout.NewDrawContext(200, 200)
 	drawBoxModel(ctx, 10, 180, 100, 50, layout.BoxModel{
 		BackgroundImage: "linear-gradient(90deg, #667eea 0%, #764ba2 100%)",
-		BoxShadow:       "4px 6px 8px #d1d5db",
+		BoxShadow:       "4px 6px #d1d5db",
 	})
 
 	stream := string(ctx.ContentStream)
@@ -255,5 +255,38 @@ func TestDrawBoxModelRendersGradientAndShadow(t *testing.T) {
 	}
 	if count := strings.Count(stream, " re f\n"); count < 10 {
 		t.Fatalf("expected gradient strips in stream, got count=%d\n%s", count, stream)
+	}
+	if len(ctx.ExtGStates) != 0 {
+		t.Fatalf("expected no transparency state for simple shadow, got %v", ctx.ExtGStates)
+	}
+}
+
+func TestDrawBoxModelSkipsUnsupportedBlurredShadow(t *testing.T) {
+	ctx := layout.NewDrawContext(200, 200)
+	drawBoxModel(ctx, 10, 180, 100, 50, layout.BoxModel{
+		BoxShadow: "0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)",
+	})
+
+	stream := string(ctx.ContentStream)
+	if strings.Contains(stream, " rg ") || strings.Contains(stream, "/GS") {
+		t.Fatalf("expected unsupported blurred shadow to be skipped, got:\n%s", stream)
+	}
+}
+
+func TestDrawBoxModelUsesBackgroundPositionSizeAndRepeat(t *testing.T) {
+	ctx := layout.NewDrawContext(240, 240)
+	drawBoxModel(ctx, 10, 210, 120, 80, layout.BoxModel{
+		BackgroundImage:    "linear-gradient(90deg, #667eea 0%, #764ba2 100%)",
+		BackgroundPosition: "center top",
+		BackgroundSize:     "50% 25%",
+		BackgroundRepeat:   "repeat-x",
+	})
+
+	stream := string(ctx.ContentStream)
+	if !strings.Contains(stream, "40.00 190.00") {
+		t.Fatalf("expected positioned gradient tile near centered top origin, got:\n%s", stream)
+	}
+	if count := strings.Count(stream, " re f\n"); count < 20 {
+		t.Fatalf("expected repeated gradient tiles, got count=%d\n%s", count, stream)
 	}
 }
