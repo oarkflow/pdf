@@ -173,7 +173,28 @@ buildResult:
 		}
 		allBlocks = append(allBlocks, bgBlock)
 	}
-	allBlocks = append(allBlocks, childBlocks...)
+	if shouldClipBoxChildren(e.Style, bm) {
+		capturedBm := bm
+		capturedW := w
+		capturedH := totalHeight
+		clipStart := layout.PlacedBlock{
+			X: 0, Y: 0, Width: w, Height: totalHeight,
+			Draw: func(ctx *layout.DrawContext, x, topY float64) {
+				beginBoxClip(ctx, x, topY, capturedW, capturedH, capturedBm)
+			},
+		}
+		clipEnd := layout.PlacedBlock{
+			X: 0, Y: 0, Width: w, Height: totalHeight,
+			Draw: func(ctx *layout.DrawContext, x, topY float64) {
+				ctx.WriteString("Q\n")
+			},
+		}
+		allBlocks = append(allBlocks, clipStart)
+		allBlocks = append(allBlocks, childBlocks...)
+		allBlocks = append(allBlocks, clipEnd)
+	} else {
+		allBlocks = append(allBlocks, childBlocks...)
+	}
 
 	if len(overflowChildren) > 0 {
 		overflowDiv := &DivElement{
@@ -1988,8 +2009,21 @@ func toWinAnsi(s string) string {
 // roundedRect returns PDF path operators for a rounded rectangle.
 // (x, y) is the bottom-left corner; w and h are width and height; r is the corner radius.
 func roundedRect(x, y, w, h, r float64) string {
+	return roundedRectCorners(x, y, w, h, r, r, r, r)
+}
+
+// roundedRectCorners returns PDF path operators for a rounded rectangle with
+// per-corner radii in top-left, top-right, bottom-right, bottom-left order.
+func roundedRectCorners(x, y, w, h, tl, tr, br, bl float64) string {
 	const kappa = 0.5523
-	k := r * kappa
+	tl = clampCornerRadius(tl, w, h)
+	tr = clampCornerRadius(tr, w, h)
+	br = clampCornerRadius(br, w, h)
+	bl = clampCornerRadius(bl, w, h)
+	tlk := tl * kappa
+	trk := tr * kappa
+	brk := br * kappa
+	blk := bl * kappa
 	return fmt.Sprintf(
 		"%.2f %.2f m "+
 			"%.2f %.2f l "+
@@ -2001,42 +2035,65 @@ func roundedRect(x, y, w, h, r float64) string {
 			"%.2f %.2f l "+
 			"%.2f %.2f %.2f %.2f %.2f %.2f c "+
 			"h ",
-		x+r, y,
-		x+w-r, y,
-		x+w-r+k, y, x+w, y+r-k, x+w, y+r,
-		x+w, y+h-r,
-		x+w, y+h-r+k, x+w-r+k, y+h, x+w-r, y+h,
-		x+r, y+h,
-		x+r-k, y+h, x, y+h-r+k, x, y+h-r,
-		x, y+r,
-		x, y+r-k, x+r-k, y, x+r, y,
+		x+bl, y,
+		x+w-br, y,
+		x+w-br+brk, y, x+w, y+br-brk, x+w, y+br,
+		x+w, y+h-tr,
+		x+w, y+h-tr+trk, x+w-tr+trk, y+h, x+w-tr, y+h,
+		x+tl, y+h,
+		x+tl-tlk, y+h, x, y+h-tl+tlk, x, y+h-tl,
+		x, y+bl,
+		x, y+bl-blk, x+bl-blk, y, x+bl, y,
 	)
+}
+
+func clampCornerRadius(r, w, h float64) float64 {
+	if r < 0 {
+		return 0
+	}
+	if r > w/2 {
+		r = w / 2
+	}
+	if r > h/2 {
+		r = h / 2
+	}
+	return r
 }
 
 // drawBoxModel draws background and borders.
 func drawBoxModel(ctx *layout.DrawContext, x, topY, width, height float64, bm layout.BoxModel) {
+	bx := x + bm.MarginLeft
+	by := topY - height + bm.MarginBottom
+	bw := width - bm.MarginLeft - bm.MarginRight
+	bh := height - bm.MarginTop - bm.MarginBottom
+	if bw <= 0 || bh <= 0 {
+		return
+	}
+
+	if bm.BoxShadow != "" {
+		drawBoxShadow(ctx, bx, by, bw, bh, bm)
+	}
+
 	if bm.Background != nil {
 		bg := bm.Background
-		bx := x + bm.MarginLeft
-		by := topY - height + bm.MarginBottom
-		bw := width - bm.MarginLeft - bm.MarginRight
-		bh := height - bm.MarginTop - bm.MarginBottom
-		if bm.BorderRadius > 0 {
-			r := bm.BorderRadius
-			if r > bw/2 {
-				r = bw / 2
-			}
-			if r > bh/2 {
-				r = bh / 2
-			}
+		if hasAnyBoxRadius(bm) {
 			ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f rg %sf\n",
-				bg[0], bg[1], bg[2], roundedRect(bx, by, bw, bh, r)))
+				bg[0], bg[1], bg[2], roundedRectCorners(
+					bx, by, bw, bh,
+					bm.BorderTopLeftRadius,
+					bm.BorderTopRightRadius,
+					bm.BorderBottomRightRadius,
+					bm.BorderBottomLeftRadius,
+				)))
 		} else {
 			ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f rg %.2f %.2f %.2f %.2f re f\n",
 				bg[0], bg[1], bg[2], bx, by, bw, bh))
 		}
 	}
-	if bm.BorderRadius > 0 {
+	if bm.BackgroundImage != "" {
+		drawBackgroundImage(ctx, bx, by, bw, bh, bm)
+	}
+	if hasAnyBoxRadius(bm) && hasUniformVisibleBorder(bm) {
 		bw := bm.BorderTopWidth
 		if bm.BorderBottomWidth > bw {
 			bw = bm.BorderBottomWidth
@@ -2052,39 +2109,356 @@ func drawBoxModel(ctx *layout.DrawContext, x, topY, width, height float64, bm la
 			by := topY - height + bm.MarginBottom
 			bWidth := width - bm.MarginLeft - bm.MarginRight
 			bHeight := height - bm.MarginTop - bm.MarginBottom
-			r := bm.BorderRadius
-			if r > bWidth/2 {
-				r = bWidth / 2
-			}
-			if r > bHeight/2 {
-				r = bHeight / 2
-			}
+			borderColor := resolvedBorderColor(bm.BorderTopColor, bm.BorderColor)
 			ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f RG %.2f w %sS\n",
-				bm.BorderColor[0], bm.BorderColor[1], bm.BorderColor[2],
-				bw, roundedRect(bx, by, bWidth, bHeight, r)))
+				borderColor[0], borderColor[1], borderColor[2],
+				bw, roundedRectCorners(
+					bx, by, bWidth, bHeight,
+					bm.BorderTopLeftRadius,
+					bm.BorderTopRightRadius,
+					bm.BorderBottomRightRadius,
+					bm.BorderBottomLeftRadius,
+				)))
 		}
-	} else {
-		if bm.BorderTopWidth > 0 {
-			y := topY - bm.MarginTop
-			ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f RG %.2f w %.2f %.2f m %.2f %.2f l S\n",
-				bm.BorderColor[0], bm.BorderColor[1], bm.BorderColor[2],
-				bm.BorderTopWidth, x+bm.MarginLeft, y, x+width-bm.MarginRight, y))
+		return
+	}
+	drawBoxSides(ctx, x, topY, width, height, bm)
+}
+
+func drawBackgroundImage(ctx *layout.DrawContext, x, y, width, height float64, bm layout.BoxModel) {
+	image := strings.TrimSpace(bm.BackgroundImage)
+	if image == "" {
+		return
+	}
+	if drawLinearGradientBackground(ctx, x, y, width, height, bm, image) {
+		return
+	}
+}
+
+func drawLinearGradientBackground(ctx *layout.DrawContext, x, y, width, height float64, bm layout.BoxModel, image string) bool {
+	layer := strings.TrimSpace(firstTopLevelCSSLayer(image))
+	lower := strings.ToLower(layer)
+	if !strings.HasPrefix(lower, "linear-gradient(") {
+		return false
+	}
+	inner := strings.TrimSpace(layer[len("linear-gradient("):])
+	if strings.HasSuffix(inner, ")") {
+		inner = inner[:len(inner)-1]
+	}
+	args := splitTopLevelCSV(inner)
+	if len(args) < 2 {
+		return false
+	}
+
+	startIdx := 0
+	direction := "vertical"
+	if looksLikeGradientDirection(args[0]) {
+		direction = parseGradientDirection(args[0])
+		startIdx = 1
+	}
+	if len(args[startIdx:]) < 2 {
+		return false
+	}
+
+	startColor, ok := extractGradientColor(args[startIdx])
+	if !ok {
+		return false
+	}
+	endColor, ok := extractGradientColor(args[len(args)-1])
+	if !ok {
+		return false
+	}
+
+	if hasAnyBoxRadius(bm) {
+		ctx.WriteString("q\n")
+		ctx.WriteString(fmt.Sprintf("%sW n\n", roundedRectCorners(
+			x, y, width, height,
+			bm.BorderTopLeftRadius,
+			bm.BorderTopRightRadius,
+			bm.BorderBottomRightRadius,
+			bm.BorderBottomLeftRadius,
+		)))
+		defer ctx.WriteString("Q\n")
+	}
+
+	steps := 24
+	switch direction {
+	case "horizontal":
+		stepWidth := width / float64(steps)
+		for i := 0; i < steps; i++ {
+			t := float64(i) / float64(steps-1)
+			c := interpolateColor(startColor, endColor, t)
+			segX := x + stepWidth*float64(i)
+			segW := stepWidth
+			if i == steps-1 {
+				segW = x + width - segX
+			}
+			ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f rg %.2f %.2f %.2f %.2f re f\n",
+				c[0], c[1], c[2], segX, y, segW, height))
 		}
-		if bm.BorderBottomWidth > 0 {
-			y := topY - height + bm.MarginBottom
-			ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f RG %.2f w %.2f %.2f m %.2f %.2f l S\n",
-				bm.BorderColor[0], bm.BorderColor[1], bm.BorderColor[2],
-				bm.BorderBottomWidth, x+bm.MarginLeft, y, x+width-bm.MarginRight, y))
-		}
-		if bm.BorderLeftWidth > 0 {
-			ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f RG %.2f w %.2f %.2f m %.2f %.2f l S\n",
-				bm.BorderColor[0], bm.BorderColor[1], bm.BorderColor[2],
-				bm.BorderLeftWidth, x+bm.MarginLeft, topY-bm.MarginTop, x+bm.MarginLeft, topY-height+bm.MarginBottom))
-		}
-		if bm.BorderRightWidth > 0 {
-			ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f RG %.2f w %.2f %.2f m %.2f %.2f l S\n",
-				bm.BorderColor[0], bm.BorderColor[1], bm.BorderColor[2],
-				bm.BorderRightWidth, x+width-bm.MarginRight, topY-bm.MarginTop, x+width-bm.MarginRight, topY-height+bm.MarginBottom))
+	default:
+		stepHeight := height / float64(steps)
+		for i := 0; i < steps; i++ {
+			t := float64(i) / float64(steps-1)
+			c := interpolateColor(startColor, endColor, t)
+			segY := y + stepHeight*float64(i)
+			segH := stepHeight
+			if i == steps-1 {
+				segH = y + height - segY
+			}
+			ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f rg %.2f %.2f %.2f %.2f re f\n",
+				c[0], c[1], c[2], x, segY, width, segH))
 		}
 	}
+
+	return true
+}
+
+func drawBoxShadow(ctx *layout.DrawContext, x, y, width, height float64, bm layout.BoxModel) {
+	offsetX, offsetY, blur, spread, color, ok := parseBoxShadow(bm.BoxShadow)
+	if !ok {
+		return
+	}
+	expand := spread + blur*0.5
+	shadowX := x + offsetX - expand
+	shadowY := y - offsetY - expand
+	shadowW := width + expand*2
+	shadowH := height + expand*2
+	if shadowW <= 0 || shadowH <= 0 {
+		return
+	}
+	if hasAnyBoxRadius(bm) {
+		ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f rg %sf\n",
+			color[0], color[1], color[2], roundedRectCorners(
+				shadowX, shadowY, shadowW, shadowH,
+				bm.BorderTopLeftRadius+expand,
+				bm.BorderTopRightRadius+expand,
+				bm.BorderBottomRightRadius+expand,
+				bm.BorderBottomLeftRadius+expand,
+			)))
+		return
+	}
+	ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f rg %.2f %.2f %.2f %.2f re f\n",
+		color[0], color[1], color[2], shadowX, shadowY, shadowW, shadowH))
+}
+
+func drawBoxSides(ctx *layout.DrawContext, x, topY, width, height float64, bm layout.BoxModel) {
+	if bm.BorderTopWidth > 0 {
+		borderColor := resolvedBorderColor(bm.BorderTopColor, bm.BorderColor)
+		y := topY - bm.MarginTop
+		ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f RG %.2f w %.2f %.2f m %.2f %.2f l S\n",
+			borderColor[0], borderColor[1], borderColor[2],
+			bm.BorderTopWidth, x+bm.MarginLeft, y, x+width-bm.MarginRight, y))
+	}
+	if bm.BorderBottomWidth > 0 {
+		borderColor := resolvedBorderColor(bm.BorderBottomColor, bm.BorderColor)
+		y := topY - height + bm.MarginBottom
+		ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f RG %.2f w %.2f %.2f m %.2f %.2f l S\n",
+			borderColor[0], borderColor[1], borderColor[2],
+			bm.BorderBottomWidth, x+bm.MarginLeft, y, x+width-bm.MarginRight, y))
+	}
+	if bm.BorderLeftWidth > 0 {
+		borderColor := resolvedBorderColor(bm.BorderLeftColor, bm.BorderColor)
+		ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f RG %.2f w %.2f %.2f m %.2f %.2f l S\n",
+			borderColor[0], borderColor[1], borderColor[2],
+			bm.BorderLeftWidth, x+bm.MarginLeft, topY-bm.MarginTop, x+bm.MarginLeft, topY-height+bm.MarginBottom))
+	}
+	if bm.BorderRightWidth > 0 {
+		borderColor := resolvedBorderColor(bm.BorderRightColor, bm.BorderColor)
+		ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f RG %.2f w %.2f %.2f m %.2f %.2f l S\n",
+			borderColor[0], borderColor[1], borderColor[2],
+			bm.BorderRightWidth, x+width-bm.MarginRight, topY-bm.MarginTop, x+width-bm.MarginRight, topY-height+bm.MarginBottom))
+	}
+}
+
+func shouldClipBoxChildren(style *ComputedStyle, bm layout.BoxModel) bool {
+	if style == nil || style.Overflow != "hidden" {
+		return false
+	}
+	return hasAnyBoxRadius(bm) || bm.PaddingTop > 0 || bm.PaddingRight > 0 || bm.PaddingBottom > 0 || bm.PaddingLeft > 0
+}
+
+func beginBoxClip(ctx *layout.DrawContext, x, topY, width, height float64, bm layout.BoxModel) {
+	ctx.WriteString("q\n")
+	bx := x + bm.MarginLeft
+	by := topY - height + bm.MarginBottom
+	bw := width - bm.MarginLeft - bm.MarginRight
+	bh := height - bm.MarginTop - bm.MarginBottom
+	if bw <= 0 || bh <= 0 {
+		return
+	}
+	if hasAnyBoxRadius(bm) {
+		ctx.WriteString(fmt.Sprintf("%sW n\n", roundedRectCorners(
+			bx, by, bw, bh,
+			bm.BorderTopLeftRadius,
+			bm.BorderTopRightRadius,
+			bm.BorderBottomRightRadius,
+			bm.BorderBottomLeftRadius,
+		)))
+		return
+	}
+	ctx.WriteString(fmt.Sprintf("%.2f %.2f %.2f %.2f re W n\n", bx, by, bw, bh))
+}
+
+func hasUniformVisibleBorder(bm layout.BoxModel) bool {
+	if bm.BorderTopWidth <= 0 {
+		return false
+	}
+	return bm.BorderTopWidth == bm.BorderRightWidth &&
+		bm.BorderTopWidth == bm.BorderBottomWidth &&
+		bm.BorderTopWidth == bm.BorderLeftWidth &&
+		resolvedBorderColor(bm.BorderTopColor, bm.BorderColor) == resolvedBorderColor(bm.BorderRightColor, bm.BorderColor) &&
+		resolvedBorderColor(bm.BorderTopColor, bm.BorderColor) == resolvedBorderColor(bm.BorderBottomColor, bm.BorderColor) &&
+		resolvedBorderColor(bm.BorderTopColor, bm.BorderColor) == resolvedBorderColor(bm.BorderLeftColor, bm.BorderColor)
+}
+
+func resolvedBorderColor(sideColor, fallback [3]float64) [3]float64 {
+	if sideColor != ([3]float64{}) {
+		return sideColor
+	}
+	return fallback
+}
+
+func hasAnyBoxRadius(bm layout.BoxModel) bool {
+	return bm.BorderRadius > 0 ||
+		bm.BorderTopLeftRadius > 0 ||
+		bm.BorderTopRightRadius > 0 ||
+		bm.BorderBottomRightRadius > 0 ||
+		bm.BorderBottomLeftRadius > 0
+}
+
+func firstTopLevelCSSLayer(value string) string {
+	layers := splitTopLevelCSV(value)
+	if len(layers) == 0 {
+		return value
+	}
+	return layers[0]
+}
+
+func splitTopLevelCSV(value string) []string {
+	var parts []string
+	depth := 0
+	var quote byte
+	start := 0
+	for i := 0; i < len(value); i++ {
+		if quote != 0 {
+			if value[i] == '\\' && i+1 < len(value) {
+				i++
+				continue
+			}
+			if value[i] == quote {
+				quote = 0
+			}
+			continue
+		}
+		switch value[i] {
+		case '"', '\'':
+			quote = value[i]
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		case ',':
+			if depth == 0 {
+				part := strings.TrimSpace(value[start:i])
+				if part != "" {
+					parts = append(parts, part)
+				}
+				start = i + 1
+			}
+		}
+	}
+	if start < len(value) {
+		part := strings.TrimSpace(value[start:])
+		if part != "" {
+			parts = append(parts, part)
+		}
+	}
+	return parts
+}
+
+func looksLikeGradientDirection(token string) bool {
+	token = strings.TrimSpace(strings.ToLower(token))
+	return strings.HasPrefix(token, "to ") ||
+		strings.HasSuffix(token, "deg") ||
+		strings.HasSuffix(token, "turn") ||
+		strings.HasSuffix(token, "rad")
+}
+
+func parseGradientDirection(token string) string {
+	token = strings.TrimSpace(strings.ToLower(token))
+	if strings.Contains(token, "right") || strings.Contains(token, "left") {
+		return "horizontal"
+	}
+	if strings.HasSuffix(token, "deg") {
+		if degrees, err := strconv.ParseFloat(strings.TrimSuffix(token, "deg"), 64); err == nil {
+			degrees = math.Mod(degrees, 360)
+			if degrees < 0 {
+				degrees += 360
+			}
+			if (degrees >= 45 && degrees <= 135) || (degrees >= 225 && degrees <= 315) {
+				return "horizontal"
+			}
+		}
+	}
+	return "vertical"
+}
+
+func extractGradientColor(stop string) ([3]float64, bool) {
+	parts := splitCSSValues(stop)
+	for _, part := range parts {
+		if c, ok := parseColor(part); ok {
+			return c, true
+		}
+	}
+	return [3]float64{}, false
+}
+
+func interpolateColor(start, end [3]float64, t float64) [3]float64 {
+	return [3]float64{
+		start[0] + (end[0]-start[0])*t,
+		start[1] + (end[1]-start[1])*t,
+		start[2] + (end[2]-start[2])*t,
+	}
+}
+
+func parseBoxShadow(value string) (float64, float64, float64, float64, [3]float64, bool) {
+	layer := strings.TrimSpace(firstTopLevelCSSLayer(value))
+	if layer == "" || strings.EqualFold(layer, "none") {
+		return 0, 0, 0, 0, [3]float64{}, false
+	}
+	parts := splitCSSValues(layer)
+	if len(parts) < 2 {
+		return 0, 0, 0, 0, [3]float64{}, false
+	}
+	color := [3]float64{0.75, 0.75, 0.75}
+	var lengths []float64
+	for _, part := range parts {
+		lower := strings.ToLower(part)
+		if lower == "inset" {
+			return 0, 0, 0, 0, [3]float64{}, false
+		}
+		if c, ok := parseColor(part); ok {
+			color = c
+			continue
+		}
+		length := parseLength(part)
+		if length.Unit != "" || length.Value != 0 || part == "0" || strings.HasPrefix(part, ".") || strings.HasPrefix(part, "-") {
+			lengths = append(lengths, length.ToPoints(12, 12))
+		}
+	}
+	if len(lengths) < 2 {
+		return 0, 0, 0, 0, [3]float64{}, false
+	}
+	blur := 0.0
+	spread := 0.0
+	if len(lengths) > 2 {
+		blur = lengths[2]
+	}
+	if len(lengths) > 3 {
+		spread = lengths[3]
+	}
+	return lengths[0], lengths[1], blur, spread, color, true
 }

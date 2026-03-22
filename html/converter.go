@@ -8,6 +8,7 @@ import (
 	"unicode"
 
 	"github.com/oarkflow/fasttpl"
+	"github.com/oarkflow/pdf/core"
 	"github.com/oarkflow/pdf/layout"
 	"github.com/oarkflow/pdf/tailwind"
 )
@@ -49,6 +50,7 @@ type Options struct {
 	UserStylesheet    string
 	EnableJavaScript  bool
 	UseTailwind       bool
+	Encryption        *core.EncryptionConfig
 	// TemplateData, when non-nil, causes the HTML to be processed as a fasttpl
 	// template before parsing. Supports {{ if }}, {{ range }}, {{ filters }},
 	// nested keys like {{ user.name }}, etc.
@@ -782,7 +784,9 @@ func (c *converter) convertDiv(node *Node) layout.Element {
 	}
 
 	if len(children) == 0 {
-		return nil
+		if !shouldPreserveEmptyBlock(node.Style) {
+			return nil
+		}
 	}
 
 	return &DivElement{
@@ -792,6 +796,37 @@ func (c *converter) convertDiv(node *Node) layout.Element {
 	}
 }
 
+func shouldPreserveEmptyBlock(style *ComputedStyle) bool {
+	if style == nil {
+		return false
+	}
+	if style.FlexGrow > 0 || !style.FlexBasis.IsAuto() {
+		return true
+	}
+	if hasSpecifiedLength(style.Width) || hasSpecifiedLength(style.Height) ||
+		hasSpecifiedLength(style.MinWidth) || hasSpecifiedLength(style.MaxWidth) ||
+		hasSpecifiedLength(style.MinHeight) || hasSpecifiedLength(style.MaxHeight) {
+		return true
+	}
+	if style.BackgroundColor != nil || hasAnyBorderRadius(style) {
+		return true
+	}
+	if style.BorderTopWidth > 0 || style.BorderRightWidth > 0 || style.BorderBottomWidth > 0 || style.BorderLeftWidth > 0 {
+		return true
+	}
+	if hasSpecifiedLength(style.MarginTop) || hasSpecifiedLength(style.MarginRight) ||
+		hasSpecifiedLength(style.MarginBottom) || hasSpecifiedLength(style.MarginLeft) ||
+		hasSpecifiedLength(style.PaddingTop) || hasSpecifiedLength(style.PaddingRight) ||
+		hasSpecifiedLength(style.PaddingBottom) || hasSpecifiedLength(style.PaddingLeft) {
+		return true
+	}
+	return false
+}
+
+func hasSpecifiedLength(length CSSLength) bool {
+	return !length.IsAuto() && (length.Value != 0 || length.Unit != "")
+}
+
 func shouldRenderInlineBlockAsElement(node *Node, style *ComputedStyle) bool {
 	if node.Tag == "button" {
 		return true
@@ -799,7 +834,7 @@ func shouldRenderInlineBlockAsElement(node *Node, style *ComputedStyle) bool {
 	if style == nil {
 		return false
 	}
-	if style.BackgroundColor != nil || style.BorderRadius > 0 {
+	if style.BackgroundColor != nil || hasAnyBorderRadius(style) {
 		return true
 	}
 	if style.PaddingTop.Value > 0 || style.PaddingRight.Value > 0 || style.PaddingBottom.Value > 0 || style.PaddingLeft.Value > 0 {
@@ -1149,23 +1184,95 @@ func (c *converter) computeBoxModel(style *ComputedStyle) layout.BoxModel {
 	}
 	fs := style.FontSize
 	rfs := c.rootFontSize
-	return layout.BoxModel{
-		MarginTop:         style.MarginTop.ToPoints(fs, rfs),
-		MarginRight:       style.MarginRight.ToPoints(fs, rfs),
-		MarginBottom:      style.MarginBottom.ToPoints(fs, rfs),
-		MarginLeft:        style.MarginLeft.ToPoints(fs, rfs),
-		PaddingTop:        style.PaddingTop.ToPoints(fs, rfs),
-		PaddingRight:      style.PaddingRight.ToPoints(fs, rfs),
-		PaddingBottom:     style.PaddingBottom.ToPoints(fs, rfs),
-		PaddingLeft:       style.PaddingLeft.ToPoints(fs, rfs),
-		BorderTopWidth:    style.BorderTopWidth,
-		BorderRightWidth:  style.BorderRightWidth,
-		BorderBottomWidth: style.BorderBottomWidth,
-		BorderLeftWidth:   style.BorderLeftWidth,
-		BorderColor:       style.BorderTopColor,
-		Background:        style.BackgroundColor,
-		BorderRadius:      style.BorderRadius,
+	borderTopWidth := style.BorderTopWidth
+	borderRightWidth := style.BorderRightWidth
+	borderBottomWidth := style.BorderBottomWidth
+	borderLeftWidth := style.BorderLeftWidth
+	if borderStyleSuppressesPaint(style.BorderTopStyle) {
+		borderTopWidth = 0
 	}
+	if borderStyleSuppressesPaint(style.BorderRightStyle) {
+		borderRightWidth = 0
+	}
+	if borderStyleSuppressesPaint(style.BorderBottomStyle) {
+		borderBottomWidth = 0
+	}
+	if borderStyleSuppressesPaint(style.BorderLeftStyle) {
+		borderLeftWidth = 0
+	}
+	borderColor := pickVisibleBorderColor(
+		borderTopWidth, style.BorderTopColor,
+		borderRightWidth, style.BorderRightColor,
+		borderBottomWidth, style.BorderBottomColor,
+		borderLeftWidth, style.BorderLeftColor,
+	)
+	return layout.BoxModel{
+		MarginTop:               style.MarginTop.ToPoints(fs, rfs),
+		MarginRight:             style.MarginRight.ToPoints(fs, rfs),
+		MarginBottom:            style.MarginBottom.ToPoints(fs, rfs),
+		MarginLeft:              style.MarginLeft.ToPoints(fs, rfs),
+		PaddingTop:              style.PaddingTop.ToPoints(fs, rfs),
+		PaddingRight:            style.PaddingRight.ToPoints(fs, rfs),
+		PaddingBottom:           style.PaddingBottom.ToPoints(fs, rfs),
+		PaddingLeft:             style.PaddingLeft.ToPoints(fs, rfs),
+		BorderTopWidth:          borderTopWidth,
+		BorderRightWidth:        borderRightWidth,
+		BorderBottomWidth:       borderBottomWidth,
+		BorderLeftWidth:         borderLeftWidth,
+		BorderColor:             borderColor,
+		BorderTopColor:          style.BorderTopColor,
+		BorderRightColor:        style.BorderRightColor,
+		BorderBottomColor:       style.BorderBottomColor,
+		BorderLeftColor:         style.BorderLeftColor,
+		Background:              style.BackgroundColor,
+		BackgroundImage:         style.BackgroundImage,
+		BoxShadow:               style.BoxShadow,
+		BorderRadius:            style.BorderRadius,
+		BorderTopLeftRadius:     style.BorderTopLeftRadius,
+		BorderTopRightRadius:    style.BorderTopRightRadius,
+		BorderBottomRightRadius: style.BorderBottomRightRadius,
+		BorderBottomLeftRadius:  style.BorderBottomLeftRadius,
+	}
+}
+
+func borderStyleSuppressesPaint(style string) bool {
+	switch strings.ToLower(style) {
+	case "none", "hidden":
+		return true
+	default:
+		return false
+	}
+}
+
+func pickVisibleBorderColor(
+	topWidth float64, topColor [3]float64,
+	rightWidth float64, rightColor [3]float64,
+	bottomWidth float64, bottomColor [3]float64,
+	leftWidth float64, leftColor [3]float64,
+) [3]float64 {
+	switch {
+	case topWidth > 0:
+		return topColor
+	case rightWidth > 0:
+		return rightColor
+	case bottomWidth > 0:
+		return bottomColor
+	case leftWidth > 0:
+		return leftColor
+	default:
+		return topColor
+	}
+}
+
+func hasAnyBorderRadius(style *ComputedStyle) bool {
+	if style == nil {
+		return false
+	}
+	return style.BorderRadius > 0 ||
+		style.BorderTopLeftRadius > 0 ||
+		style.BorderTopRightRadius > 0 ||
+		style.BorderBottomRightRadius > 0 ||
+		style.BorderBottomLeftRadius > 0
 }
 
 func isInlineTag(tag string) bool {

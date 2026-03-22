@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/oarkflow/pdf"
+	"github.com/oarkflow/pdf/core"
 	"github.com/oarkflow/pdf/html"
 	"github.com/oarkflow/pdf/template"
 )
@@ -160,18 +161,33 @@ func main() {
 		os.Exit(1)
 	}
 
-	err = pdf.FromHTML(invoiceHTML, "invoice.pdf", html.Options{
+	baseOpt := html.Options{
 		DefaultFontSize:   10,
 		DefaultFontFamily: "Helvetica",
 		PageSize:          [2]float64{595.28, 841.89}, // A4
 		Margins:           [4]float64{40, 40, 50, 40},
 		UseTailwind:       true,
-	})
+	}
+	err = pdf.FromHTML(invoiceHTML, "invoice.pdf", baseOpt)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 	fmt.Println("Generated invoice.pdf")
+
+	protectedOpt := baseOpt
+	protectedOpt.Encryption = &core.EncryptionConfig{
+		Algorithm:     core.AES_128,
+		OwnerPassword: "owner-invoice-demo-2026",
+		UserPassword:  "open-sesame",
+		Permissions:   0xFFFFF0C4,
+	}
+	err = pdf.FromHTML(invoiceHTML, "invoice_protected.pdf", protectedOpt)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error generating protected invoice: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("Generated invoice_protected.pdf (password: open-sesame)")
 
 	// Also generate PDF from the Tailwind-styled invoice.html file
 	htmlBytes, err := os.ReadFile("examples/html_invoice/invoice.html")
@@ -180,18 +196,33 @@ func main() {
 		htmlBytes, err = os.ReadFile("invoice.html")
 	}
 	if err == nil {
-		err = pdf.FromHTML(string(htmlBytes), "invoice_tailwind.pdf", html.Options{
+		tailwindOpt := html.Options{
 			DefaultFontSize:   10,
 			DefaultFontFamily: "Helvetica",
 			PageSize:          [2]float64{595.28, 841.89},
 			Margins:           [4]float64{40, 40, 50, 40},
 			UseTailwind:       true,
 			EnableJavaScript:  true,
-		})
+		}
+		err = pdf.FromHTML(string(htmlBytes), "invoice_tailwind.pdf", tailwindOpt)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error generating tailwind invoice: %v\n", err)
 		} else {
 			fmt.Println("Generated invoice_tailwind.pdf")
+		}
+
+		protectedTailwindOpt := tailwindOpt
+		protectedTailwindOpt.Encryption = &core.EncryptionConfig{
+			Algorithm:     core.AES_128,
+			OwnerPassword: "owner-newsletter-demo-2026",
+			UserPassword:  "open-sesame",
+			Permissions:   0xFFFFF0C4,
+		}
+		err = pdf.FromHTML(string(htmlBytes), "invoice_tailwind_protected.pdf", protectedTailwindOpt)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error generating protected tailwind invoice: %v\n", err)
+		} else {
+			fmt.Println("Generated invoice_tailwind_protected.pdf (password: open-sesame)")
 		}
 	}
 }

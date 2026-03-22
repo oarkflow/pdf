@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/md5"
@@ -108,21 +109,23 @@ func ComputeEncryptionKey(config EncryptionConfig, documentID []byte) ([]byte, e
 		return computeEncryptionKeyAES256(config)
 	}
 	userPad := PadPassword(config.UserPassword)
-	h := md5.New()
-	h.Write(userPad)
 	oValue, err := ComputeOwnerPasswordValue(config)
 	if err != nil {
 		return nil, err
 	}
-	h.Write(oValue)
+	return computeStandardEncryptionKey(userPad, config.Permissions, documentID, config.Algorithm, oValue)
+}
+
+func computeStandardEncryptionKey(userPad []byte, permissions uint32, documentID []byte, algorithm EncryptionAlgorithm, oValue ...[]byte) ([]byte, error) {
+	h := md5.New()
+	h.Write(userPad)
+	if len(oValue) > 0 && oValue[0] != nil {
+		h.Write(oValue[0])
+	}
 	// Permissions as little-endian 4 bytes
-	p := config.Permissions
+	p := permissions
 	h.Write([]byte{byte(p), byte(p >> 8), byte(p >> 16), byte(p >> 24)})
 	h.Write(documentID)
-	if config.Algorithm == AES_128 {
-		// Revision 4: include additional AES marker
-		h.Write([]byte{0xFF, 0xFF, 0xFF, 0xFF})
-	}
 	digest := h.Sum(nil)
 
 	keyLen := 16 // 128-bit for both RC4-128 and AES-128
@@ -148,11 +151,18 @@ func ComputeUserPasswordValue(config EncryptionConfig, documentID []byte) ([]byt
 	if config.Algorithm == AES_256 {
 		return computeUserPasswordAES256(config)
 	}
-	key, err := ComputeEncryptionKey(config, documentID)
+	oValue, err := ComputeOwnerPasswordValue(config)
 	if err != nil {
 		return nil, err
 	}
+	key, err := computeStandardEncryptionKey(PadPassword(config.UserPassword), config.Permissions, documentID, config.Algorithm, oValue)
+	if err != nil {
+		return nil, err
+	}
+	return computeStandardUserPasswordValue(key, documentID)
+}
 
+func computeStandardUserPasswordValue(key, documentID []byte) ([]byte, error) {
 	// Algorithm 5 (revision 3): MD5 of padding + document ID, then RC4 rounds
 	h := md5.New()
 	h.Write(passwordPadding)
@@ -183,6 +193,76 @@ func ComputeUserPasswordValue(config EncryptionConfig, documentID []byte) ([]byt
 		return nil, fmt.Errorf("generate user password padding: %w", err)
 	}
 	return result, nil
+}
+
+// AuthenticateUserPassword validates a Standard Security handler user password
+// for RC4-128 or AES-128 documents and returns the file encryption key.
+func AuthenticateUserPassword(password string, algorithm EncryptionAlgorithm, oValue, uValue []byte, permissions uint32, documentID []byte) ([]byte, bool, error) {
+	if algorithm == AES_256 {
+		return nil, false, fmt.Errorf("AES-256 authentication is not supported")
+	}
+	key, err := computeStandardEncryptionKey(PadPassword(password), permissions, documentID, algorithm, oValue)
+	if err != nil {
+		return nil, false, err
+	}
+	expectedU, err := computeStandardUserPasswordValue(key, documentID)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(uValue) >= 16 && bytes.Equal(expectedU[:16], uValue[:16]) {
+		return key, true, nil
+	}
+	return nil, false, nil
+}
+
+// AuthenticateOwnerPassword validates an owner password for RC4-128 or AES-128
+// documents and returns the file encryption key.
+func AuthenticateOwnerPassword(password string, algorithm EncryptionAlgorithm, oValue, uValue []byte, permissions uint32, documentID []byte) ([]byte, bool, error) {
+	if algorithm == AES_256 {
+		return nil, false, fmt.Errorf("AES-256 authentication is not supported")
+	}
+	userPad, err := recoverUserPadFromOwnerPassword(password, oValue)
+	if err != nil {
+		return nil, false, err
+	}
+	key, err := computeStandardEncryptionKey(userPad, permissions, documentID, algorithm, oValue)
+	if err != nil {
+		return nil, false, err
+	}
+	expectedU, err := computeStandardUserPasswordValue(key, documentID)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(uValue) >= 16 && bytes.Equal(expectedU[:16], uValue[:16]) {
+		return key, true, nil
+	}
+	return nil, false, nil
+}
+
+func recoverUserPadFromOwnerPassword(password string, oValue []byte) ([]byte, error) {
+	ownerPad := PadPassword(password)
+	h := md5.Sum(ownerPad)
+	digest := h[:]
+	for i := 0; i < 50; i++ {
+		tmp := md5.Sum(digest)
+		digest = tmp[:]
+	}
+	key := digest[:16]
+
+	decrypted := make([]byte, len(oValue))
+	copy(decrypted, oValue)
+	for i := 19; i >= 0; i-- {
+		tmpKey := make([]byte, len(key))
+		for j := range tmpKey {
+			tmpKey[j] = key[j] ^ byte(i)
+		}
+		c, err := rc4.NewCipher(tmpKey)
+		if err != nil {
+			return nil, fmt.Errorf("rc4 owner decrypt round %d: %w", i, err)
+		}
+		c.XORKeyStream(decrypted, decrypted)
+	}
+	return decrypted, nil
 }
 
 func computeUserPasswordAES256(config EncryptionConfig) ([]byte, error) {

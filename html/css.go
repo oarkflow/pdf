@@ -260,8 +260,19 @@ func (p *cssParser) readIdent() string {
 func (p *cssParser) readUntil(ch byte) string {
 	start := p.pos
 	depth := 0
+	var quote byte
 	for p.pos < len(p.input) {
-		if p.input[p.pos] == '(' || p.input[p.pos] == '[' {
+		if quote != 0 {
+			if p.input[p.pos] == '\\' && p.pos+1 < len(p.input) {
+				p.pos += 2
+				continue
+			}
+			if p.input[p.pos] == quote {
+				quote = 0
+			}
+		} else if p.input[p.pos] == '"' || p.input[p.pos] == '\'' {
+			quote = p.input[p.pos]
+		} else if p.input[p.pos] == '(' || p.input[p.pos] == '[' {
 			depth++
 		} else if p.input[p.pos] == ')' || p.input[p.pos] == ']' {
 			depth--
@@ -287,11 +298,24 @@ func splitDeclarations(style string) []string {
 	var result []string
 	depth := 0
 	start := 0
+	var quote byte
 	for i := 0; i < len(style); i++ {
+		if quote != 0 {
+			if style[i] == '\\' && i+1 < len(style) {
+				i++
+				continue
+			}
+			if style[i] == quote {
+				quote = 0
+			}
+			continue
+		}
 		switch style[i] {
-		case '(':
+		case '"', '\'':
+			quote = style[i]
+		case '(', '[':
 			depth++
-		case ')':
+		case ')', ']':
 			depth--
 		case ';':
 			if depth == 0 {
@@ -311,7 +335,7 @@ func splitDeclarations(style string) []string {
 }
 
 func parseDeclaration(decl string) (string, CSSValue) {
-	idx := strings.IndexByte(decl, ':')
+	idx := findCSSDelimiter(decl, ':')
 	if idx < 0 {
 		return "", CSSValue{}
 	}
@@ -323,6 +347,38 @@ func parseDeclaration(decl string) (string, CSSValue) {
 		value = strings.TrimSpace(value[:len(value)-10])
 	}
 	return strings.ToLower(name), CSSValue{Value: value, Priority: priority}
+}
+
+func findCSSDelimiter(s string, delim byte) int {
+	depth := 0
+	var quote byte
+	for i := 0; i < len(s); i++ {
+		if quote != 0 {
+			if s[i] == '\\' && i+1 < len(s) {
+				i++
+				continue
+			}
+			if s[i] == quote {
+				quote = 0
+			}
+			continue
+		}
+		switch s[i] {
+		case '"', '\'':
+			quote = s[i]
+		case '(', '[':
+			depth++
+		case ')', ']':
+			if depth > 0 {
+				depth--
+			}
+		default:
+			if depth == 0 && s[i] == delim {
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 func stripQuotes(s string) string {
@@ -370,6 +426,8 @@ func expandShorthand(name string, val CSSValue) map[string]CSSValue {
 		result["border-radius"] = val
 	case "background":
 		expandBackgroundShorthand(val, result)
+	case "box-shadow":
+		result["box-shadow"] = val
 	case "font":
 		expandFontShorthand(val, result)
 	case "list-style":
@@ -462,12 +520,35 @@ func expandBorderSideShorthand(name string, val CSSValue, result map[string]CSSV
 
 func expandBackgroundShorthand(val CSSValue, result map[string]CSSValue) {
 	v := strings.TrimSpace(val.Value)
-	if isColor(v) || strings.HasPrefix(v, "#") || strings.HasPrefix(v, "rgb") {
-		result["background-color"] = CSSValue{Value: v, Priority: val.Priority}
-	} else {
-		// Just store as background-color for simple cases
+	if v == "" {
+		return
+	}
+	if color := extractBackgroundColor(v); color != "" {
+		result["background-color"] = CSSValue{Value: color, Priority: val.Priority}
+	}
+	lower := strings.ToLower(v)
+	if strings.Contains(lower, "gradient(") || strings.Contains(lower, "url(") {
+		result["background-image"] = CSSValue{Value: v, Priority: val.Priority}
+		return
+	}
+	if _, ok := result["background-color"]; !ok {
 		result["background-color"] = CSSValue{Value: v, Priority: val.Priority}
 	}
+}
+
+func extractBackgroundColor(v string) string {
+	parts := splitCSSValues(v)
+	for i := len(parts) - 1; i >= 0; i-- {
+		part := strings.TrimSpace(parts[i])
+		if part == "" {
+			continue
+		}
+		lower := strings.ToLower(part)
+		if isColor(lower) || strings.HasPrefix(lower, "#") || strings.HasPrefix(lower, "rgb") || strings.HasPrefix(lower, "hsl") {
+			return part
+		}
+	}
+	return ""
 }
 
 func expandFontShorthand(val CSSValue, result map[string]CSSValue) {

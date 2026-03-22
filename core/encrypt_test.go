@@ -165,6 +165,31 @@ func TestComputeUserPasswordValue(t *testing.T) {
 	}
 }
 
+func TestAES128KeyDerivationMatchesRC4WhenMetadataEncrypted(t *testing.T) {
+	docID := []byte("1234567890abcdef")
+
+	rc4Cfg := EncryptionConfig{
+		Algorithm:     RC4_128,
+		OwnerPassword: "owner",
+		UserPassword:  "user",
+		Permissions:   0xFFFFF0C4,
+	}
+	aesCfg := rc4Cfg
+	aesCfg.Algorithm = AES_128
+
+	rc4Key, err := ComputeEncryptionKey(rc4Cfg, docID)
+	if err != nil {
+		t.Fatalf("ComputeEncryptionKey RC4: %v", err)
+	}
+	aesKey, err := ComputeEncryptionKey(aesCfg, docID)
+	if err != nil {
+		t.Fatalf("ComputeEncryptionKey AES-128: %v", err)
+	}
+	if !bytes.Equal(rc4Key, aesKey) {
+		t.Fatal("expected AES-128 key derivation to match RC4 when EncryptMetadata=true")
+	}
+}
+
 func TestEncryptDecryptRC4(t *testing.T) {
 	key := make([]byte, 16)
 	for i := range key {

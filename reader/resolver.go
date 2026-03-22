@@ -44,6 +44,13 @@ type Resolver struct {
 	cache map[int]interface{}
 	mu    sync.RWMutex
 	depth int // current recursion depth
+	crypt *decryptState
+}
+
+type decryptState struct {
+	key           []byte
+	algorithm     core.EncryptionAlgorithm
+	encryptObjNum int
 }
 
 // NewResolver creates a Resolver by parsing the xref table/stream from data.
@@ -299,9 +306,11 @@ func (r *Resolver) parseObjectAt(offset int) interface{} {
 	tok.Seek(offset)
 
 	// objNum genNum obj
-	tok.Next() // object number
-	tok.Next() // generation
-	tok.Next() // "obj"
+	objNumTok, _ := tok.Next() // object number
+	genTok, _ := tok.Next()    // generation
+	tok.Next()                 // "obj"
+	objNum := int(objNumTok.Int)
+	genNum := int(genTok.Int)
 
 	obj, _ := r.parseObject(tok)
 
@@ -336,7 +345,19 @@ func (r *Resolver) parseObjectAt(offset int) interface{} {
 			end = len(r.data)
 		}
 		streamData := r.data[p:end]
+		if r.crypt != nil && objNum != r.crypt.encryptObjNum {
+			decrypted, err := core.DecryptData(streamData, r.crypt.key, objNum, genNum, r.crypt.algorithm)
+			if err == nil {
+				streamData = decrypted
+			}
+		}
 		return &StreamObject{Dict: dict, Data: streamData}
+	}
+
+	if r.crypt != nil && objNum != r.crypt.encryptObjNum {
+		if decrypted, err := r.decryptObject(obj, objNum, genNum); err == nil {
+			obj = decrypted
+		}
 	}
 
 	return obj
@@ -555,6 +576,42 @@ func (r *Resolver) ResolveReference(obj interface{}) (interface{}, error) {
 		return r.ResolveObject(ref.ObjNum)
 	}
 	return obj, nil
+}
+
+func (r *Resolver) decryptObject(obj interface{}, objNum, genNum int) (interface{}, error) {
+	switch v := obj.(type) {
+	case string:
+		if strings.HasPrefix(v, "/") {
+			return v, nil
+		}
+		plain, err := core.DecryptData([]byte(v), r.crypt.key, objNum, genNum, r.crypt.algorithm)
+		if err != nil {
+			return nil, err
+		}
+		return string(plain), nil
+	case []interface{}:
+		out := make([]interface{}, len(v))
+		for i, item := range v {
+			dec, err := r.decryptObject(item, objNum, genNum)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = dec
+		}
+		return out, nil
+	case map[string]interface{}:
+		out := make(map[string]interface{}, len(v))
+		for key, item := range v {
+			dec, err := r.decryptObject(item, objNum, genNum)
+			if err != nil {
+				return nil, err
+			}
+			out[key] = dec
+		}
+		return out, nil
+	default:
+		return obj, nil
+	}
 }
 
 // DecompressStream decompresses stream data according to the stream dictionary's /Filter.

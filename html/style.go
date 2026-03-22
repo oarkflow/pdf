@@ -46,23 +46,28 @@ type ComputedStyle struct {
 	PaddingBottom CSSLength
 	PaddingLeft   CSSLength
 
-	BorderTopWidth    float64
-	BorderRightWidth  float64
-	BorderBottomWidth float64
-	BorderLeftWidth   float64
-	BorderTopColor    [3]float64
-	BorderRightColor  [3]float64
-	BorderBottomColor [3]float64
-	BorderLeftColor   [3]float64
-	BorderTopStyle    string
-	BorderRightStyle  string
-	BorderBottomStyle string
-	BorderLeftStyle   string
-	BorderRadius      float64
+	BorderTopWidth          float64
+	BorderRightWidth        float64
+	BorderBottomWidth       float64
+	BorderLeftWidth         float64
+	BorderTopColor          [3]float64
+	BorderRightColor        [3]float64
+	BorderBottomColor       [3]float64
+	BorderLeftColor         [3]float64
+	BorderTopStyle          string
+	BorderRightStyle        string
+	BorderBottomStyle       string
+	BorderLeftStyle         string
+	BorderRadius            float64
+	BorderTopLeftRadius     float64
+	BorderTopRightRadius    float64
+	BorderBottomRightRadius float64
+	BorderBottomLeftRadius  float64
 
 	// Background
 	BackgroundColor *[3]float64
 	BackgroundImage string
+	BoxShadow       string
 
 	// Flex
 	FlexDirection  string
@@ -355,7 +360,24 @@ func (s *ComputedStyle) Apply(properties map[string]CSSValue, parentStyle *Compu
 		case "border-left-style":
 			s.BorderLeftStyle = value
 		case "border-radius":
-			s.BorderRadius = parseLengthValue(value, parentFontSize, rootFontSize)
+			tl, tr, br, bl := parseBorderRadiusValues(value, parentFontSize, rootFontSize)
+			s.BorderTopLeftRadius = tl
+			s.BorderTopRightRadius = tr
+			s.BorderBottomRightRadius = br
+			s.BorderBottomLeftRadius = bl
+			s.BorderRadius = max4(tl, tr, br, bl)
+		case "border-top-left-radius":
+			s.BorderTopLeftRadius = parseLengthValue(value, parentFontSize, rootFontSize)
+			s.BorderRadius = max4(s.BorderTopLeftRadius, s.BorderTopRightRadius, s.BorderBottomRightRadius, s.BorderBottomLeftRadius)
+		case "border-top-right-radius":
+			s.BorderTopRightRadius = parseLengthValue(value, parentFontSize, rootFontSize)
+			s.BorderRadius = max4(s.BorderTopLeftRadius, s.BorderTopRightRadius, s.BorderBottomRightRadius, s.BorderBottomLeftRadius)
+		case "border-bottom-right-radius":
+			s.BorderBottomRightRadius = parseLengthValue(value, parentFontSize, rootFontSize)
+			s.BorderRadius = max4(s.BorderTopLeftRadius, s.BorderTopRightRadius, s.BorderBottomRightRadius, s.BorderBottomLeftRadius)
+		case "border-bottom-left-radius":
+			s.BorderBottomLeftRadius = parseLengthValue(value, parentFontSize, rootFontSize)
+			s.BorderRadius = max4(s.BorderTopLeftRadius, s.BorderTopRightRadius, s.BorderBottomRightRadius, s.BorderBottomLeftRadius)
 		case "background-color":
 			if c, ok := parseColor(value); ok {
 				bg := c
@@ -363,6 +385,8 @@ func (s *ComputedStyle) Apply(properties map[string]CSSValue, parentStyle *Compu
 			}
 		case "background-image":
 			s.BackgroundImage = value
+		case "box-shadow":
+			s.BoxShadow = value
 		case "flex-direction":
 			s.FlexDirection = value
 		case "flex-wrap":
@@ -452,21 +476,10 @@ func (s *ComputedStyle) resolveVar(value string) string {
 }
 
 func (s *ComputedStyle) resolveCalc(value string) string {
-	if !strings.HasPrefix(value, "calc(") {
+	if !strings.Contains(value, "calc(") {
 		return value
 	}
-	inner := value[5:]
-	if idx := strings.LastIndexByte(inner, ')'); idx >= 0 {
-		inner = inner[:idx]
-	}
-	// Simple calc: support addition and subtraction of same-unit values
-	inner = strings.TrimSpace(inner)
-	// Try to evaluate simple expressions
-	result := evalSimpleCalc(inner)
-	if result != "" {
-		return result
-	}
-	return value
+	return resolveCalcExpressions(value)
 }
 
 func evalSimpleCalc(expr string) string {
@@ -545,6 +558,33 @@ func parseLength(s string) CSSLength {
 func parseLengthValue(s string, parentFontSize, rootFontSize float64) float64 {
 	l := parseLength(s)
 	return l.ToPoints(parentFontSize, rootFontSize)
+}
+
+func parseBorderRadiusValues(s string, parentFontSize, rootFontSize float64) (float64, float64, float64, float64) {
+	s = strings.TrimSpace(s)
+	if slash := strings.IndexByte(s, '/'); slash >= 0 {
+		s = strings.TrimSpace(s[:slash])
+	}
+	parts := splitCSSValues(s)
+	sides := expandFourValues(parts)
+	return parseLengthValue(sides[0], parentFontSize, rootFontSize),
+		parseLengthValue(sides[1], parentFontSize, rootFontSize),
+		parseLengthValue(sides[2], parentFontSize, rootFontSize),
+		parseLengthValue(sides[3], parentFontSize, rootFontSize)
+}
+
+func max4(a, b, c, d float64) float64 {
+	max := a
+	if b > max {
+		max = b
+	}
+	if c > max {
+		max = c
+	}
+	if d > max {
+		max = d
+	}
+	return max
 }
 
 func parseFontSize(s string, parentFontSize, rootFontSize float64) float64 {
@@ -710,146 +750,146 @@ func parseRGBFunction(s string) ([3]float64, bool) {
 
 // namedColors maps CSS named colors to RGB [0-1].
 var namedColors = map[string][3]float64{
-	"black":       {0, 0, 0},
-	"white":       {1, 1, 1},
-	"red":         {1, 0, 0},
-	"green":       {0, 0.502, 0},
-	"blue":        {0, 0, 1},
-	"yellow":      {1, 1, 0},
-	"cyan":        {0, 1, 1},
-	"magenta":     {1, 0, 1},
-	"orange":      {1, 0.647, 0},
-	"purple":      {0.502, 0, 0.502},
-	"pink":        {1, 0.753, 0.796},
-	"gray":        {0.502, 0.502, 0.502},
-	"grey":        {0.502, 0.502, 0.502},
-	"silver":      {0.753, 0.753, 0.753},
-	"navy":        {0, 0, 0.502},
-	"teal":        {0, 0.502, 0.502},
-	"maroon":      {0.502, 0, 0},
-	"olive":       {0.502, 0.502, 0},
-	"lime":        {0, 1, 0},
-	"aqua":        {0, 1, 1},
-	"fuchsia":     {1, 0, 1},
-	"brown":       {0.647, 0.165, 0.165},
-	"coral":       {1, 0.498, 0.314},
-	"crimson":     {0.863, 0.078, 0.235},
-	"darkblue":    {0, 0, 0.545},
-	"darkgray":    {0.663, 0.663, 0.663},
-	"darkgrey":    {0.663, 0.663, 0.663},
-	"darkgreen":   {0, 0.392, 0},
-	"darkred":     {0.545, 0, 0},
-	"gold":        {1, 0.843, 0},
-	"indigo":      {0.294, 0, 0.510},
-	"ivory":       {1, 1, 0.941},
-	"khaki":       {0.941, 0.902, 0.549},
-	"lavender":    {0.902, 0.902, 0.980},
-	"lightblue":   {0.678, 0.847, 0.902},
-	"lightgray":   {0.827, 0.827, 0.827},
-	"lightgrey":   {0.827, 0.827, 0.827},
-	"lightgreen":  {0.565, 0.933, 0.565},
-	"lightyellow": {1, 1, 0.878},
-	"tomato":      {1, 0.388, 0.278},
-	"turquoise":   {0.251, 0.878, 0.816},
-	"violet":      {0.933, 0.510, 0.933},
-	"wheat":       {0.961, 0.871, 0.702},
-	"whitesmoke":  {0.961, 0.961, 0.961},
-	"yellowgreen": {0.604, 0.804, 0.196},
-	"steelblue":   {0.275, 0.510, 0.706},
-	"slategray":   {0.439, 0.502, 0.565},
-	"slategrey":   {0.439, 0.502, 0.565},
-	"skyblue":     {0.529, 0.808, 0.922},
-	"salmon":      {0.980, 0.502, 0.447},
-	"royalblue":   {0.255, 0.412, 0.882},
-	"plum":        {0.867, 0.627, 0.867},
-	"peru":        {0.804, 0.522, 0.247},
-	"orchid":      {0.855, 0.439, 0.839},
-	"linen":       {0.980, 0.941, 0.902},
-	"chocolate":   {0.824, 0.412, 0.118},
-	"beige":       {0.961, 0.961, 0.863},
-	"azure":       {0.941, 1, 1},
-	"aliceblue":   {0.941, 0.973, 1},
-	"antiquewhite": {0.980, 0.922, 0.843},
-	"bisque":       {1, 0.894, 0.769},
-	"blanchedalmond": {1, 0.922, 0.804},
-	"burlywood":     {0.871, 0.722, 0.529},
-	"cadetblue":     {0.373, 0.620, 0.627},
-	"chartreuse":    {0.498, 1, 0},
-	"cornflowerblue": {0.392, 0.584, 0.929},
-	"cornsilk":       {1, 0.973, 0.863},
-	"darkcyan":       {0, 0.545, 0.545},
-	"darkgoldenrod":  {0.722, 0.525, 0.043},
-	"darkkhaki":      {0.741, 0.718, 0.420},
-	"darkmagenta":    {0.545, 0, 0.545},
-	"darkolivegreen": {0.333, 0.420, 0.184},
-	"darkorange":     {1, 0.549, 0},
-	"darkorchid":     {0.600, 0.196, 0.800},
-	"darksalmon":     {0.914, 0.588, 0.478},
-	"darkseagreen":   {0.561, 0.737, 0.561},
-	"darkslateblue":  {0.282, 0.239, 0.545},
-	"darkslategray":  {0.184, 0.310, 0.310},
-	"darkslategrey":  {0.184, 0.310, 0.310},
-	"darkturquoise":  {0, 0.808, 0.820},
-	"darkviolet":     {0.580, 0, 0.827},
-	"deeppink":       {1, 0.078, 0.576},
-	"deepskyblue":    {0, 0.749, 1},
-	"dimgray":        {0.412, 0.412, 0.412},
-	"dimgrey":        {0.412, 0.412, 0.412},
-	"dodgerblue":     {0.118, 0.565, 1},
-	"firebrick":      {0.698, 0.133, 0.133},
-	"floralwhite":    {1, 0.980, 0.941},
-	"forestgreen":    {0.133, 0.545, 0.133},
-	"gainsboro":      {0.863, 0.863, 0.863},
-	"ghostwhite":     {0.973, 0.973, 1},
-	"goldenrod":      {0.855, 0.647, 0.125},
-	"greenyellow":    {0.678, 1, 0.184},
-	"honeydew":       {0.941, 1, 0.941},
-	"hotpink":        {1, 0.412, 0.706},
-	"indianred":      {0.804, 0.361, 0.361},
-	"lawngreen":      {0.486, 0.988, 0},
-	"lemonchiffon":   {1, 0.980, 0.804},
-	"lightcoral":     {0.941, 0.502, 0.502},
-	"lightcyan":      {0.878, 1, 1},
-	"lightpink":      {1, 0.714, 0.757},
-	"lightsalmon":    {1, 0.627, 0.478},
-	"lightseagreen":  {0.125, 0.698, 0.667},
-	"lightskyblue":   {0.529, 0.808, 0.980},
-	"lightslategray": {0.467, 0.533, 0.600},
-	"lightslategrey": {0.467, 0.533, 0.600},
-	"lightsteelblue": {0.690, 0.769, 0.871},
-	"mediumaquamarine": {0.400, 0.804, 0.667},
-	"mediumblue":       {0, 0, 0.804},
-	"mediumorchid":     {0.729, 0.333, 0.827},
-	"mediumpurple":     {0.576, 0.439, 0.859},
-	"mediumseagreen":   {0.235, 0.702, 0.443},
-	"mediumslateblue":  {0.482, 0.408, 0.933},
+	"black":             {0, 0, 0},
+	"white":             {1, 1, 1},
+	"red":               {1, 0, 0},
+	"green":             {0, 0.502, 0},
+	"blue":              {0, 0, 1},
+	"yellow":            {1, 1, 0},
+	"cyan":              {0, 1, 1},
+	"magenta":           {1, 0, 1},
+	"orange":            {1, 0.647, 0},
+	"purple":            {0.502, 0, 0.502},
+	"pink":              {1, 0.753, 0.796},
+	"gray":              {0.502, 0.502, 0.502},
+	"grey":              {0.502, 0.502, 0.502},
+	"silver":            {0.753, 0.753, 0.753},
+	"navy":              {0, 0, 0.502},
+	"teal":              {0, 0.502, 0.502},
+	"maroon":            {0.502, 0, 0},
+	"olive":             {0.502, 0.502, 0},
+	"lime":              {0, 1, 0},
+	"aqua":              {0, 1, 1},
+	"fuchsia":           {1, 0, 1},
+	"brown":             {0.647, 0.165, 0.165},
+	"coral":             {1, 0.498, 0.314},
+	"crimson":           {0.863, 0.078, 0.235},
+	"darkblue":          {0, 0, 0.545},
+	"darkgray":          {0.663, 0.663, 0.663},
+	"darkgrey":          {0.663, 0.663, 0.663},
+	"darkgreen":         {0, 0.392, 0},
+	"darkred":           {0.545, 0, 0},
+	"gold":              {1, 0.843, 0},
+	"indigo":            {0.294, 0, 0.510},
+	"ivory":             {1, 1, 0.941},
+	"khaki":             {0.941, 0.902, 0.549},
+	"lavender":          {0.902, 0.902, 0.980},
+	"lightblue":         {0.678, 0.847, 0.902},
+	"lightgray":         {0.827, 0.827, 0.827},
+	"lightgrey":         {0.827, 0.827, 0.827},
+	"lightgreen":        {0.565, 0.933, 0.565},
+	"lightyellow":       {1, 1, 0.878},
+	"tomato":            {1, 0.388, 0.278},
+	"turquoise":         {0.251, 0.878, 0.816},
+	"violet":            {0.933, 0.510, 0.933},
+	"wheat":             {0.961, 0.871, 0.702},
+	"whitesmoke":        {0.961, 0.961, 0.961},
+	"yellowgreen":       {0.604, 0.804, 0.196},
+	"steelblue":         {0.275, 0.510, 0.706},
+	"slategray":         {0.439, 0.502, 0.565},
+	"slategrey":         {0.439, 0.502, 0.565},
+	"skyblue":           {0.529, 0.808, 0.922},
+	"salmon":            {0.980, 0.502, 0.447},
+	"royalblue":         {0.255, 0.412, 0.882},
+	"plum":              {0.867, 0.627, 0.867},
+	"peru":              {0.804, 0.522, 0.247},
+	"orchid":            {0.855, 0.439, 0.839},
+	"linen":             {0.980, 0.941, 0.902},
+	"chocolate":         {0.824, 0.412, 0.118},
+	"beige":             {0.961, 0.961, 0.863},
+	"azure":             {0.941, 1, 1},
+	"aliceblue":         {0.941, 0.973, 1},
+	"antiquewhite":      {0.980, 0.922, 0.843},
+	"bisque":            {1, 0.894, 0.769},
+	"blanchedalmond":    {1, 0.922, 0.804},
+	"burlywood":         {0.871, 0.722, 0.529},
+	"cadetblue":         {0.373, 0.620, 0.627},
+	"chartreuse":        {0.498, 1, 0},
+	"cornflowerblue":    {0.392, 0.584, 0.929},
+	"cornsilk":          {1, 0.973, 0.863},
+	"darkcyan":          {0, 0.545, 0.545},
+	"darkgoldenrod":     {0.722, 0.525, 0.043},
+	"darkkhaki":         {0.741, 0.718, 0.420},
+	"darkmagenta":       {0.545, 0, 0.545},
+	"darkolivegreen":    {0.333, 0.420, 0.184},
+	"darkorange":        {1, 0.549, 0},
+	"darkorchid":        {0.600, 0.196, 0.800},
+	"darksalmon":        {0.914, 0.588, 0.478},
+	"darkseagreen":      {0.561, 0.737, 0.561},
+	"darkslateblue":     {0.282, 0.239, 0.545},
+	"darkslategray":     {0.184, 0.310, 0.310},
+	"darkslategrey":     {0.184, 0.310, 0.310},
+	"darkturquoise":     {0, 0.808, 0.820},
+	"darkviolet":        {0.580, 0, 0.827},
+	"deeppink":          {1, 0.078, 0.576},
+	"deepskyblue":       {0, 0.749, 1},
+	"dimgray":           {0.412, 0.412, 0.412},
+	"dimgrey":           {0.412, 0.412, 0.412},
+	"dodgerblue":        {0.118, 0.565, 1},
+	"firebrick":         {0.698, 0.133, 0.133},
+	"floralwhite":       {1, 0.980, 0.941},
+	"forestgreen":       {0.133, 0.545, 0.133},
+	"gainsboro":         {0.863, 0.863, 0.863},
+	"ghostwhite":        {0.973, 0.973, 1},
+	"goldenrod":         {0.855, 0.647, 0.125},
+	"greenyellow":       {0.678, 1, 0.184},
+	"honeydew":          {0.941, 1, 0.941},
+	"hotpink":           {1, 0.412, 0.706},
+	"indianred":         {0.804, 0.361, 0.361},
+	"lawngreen":         {0.486, 0.988, 0},
+	"lemonchiffon":      {1, 0.980, 0.804},
+	"lightcoral":        {0.941, 0.502, 0.502},
+	"lightcyan":         {0.878, 1, 1},
+	"lightpink":         {1, 0.714, 0.757},
+	"lightsalmon":       {1, 0.627, 0.478},
+	"lightseagreen":     {0.125, 0.698, 0.667},
+	"lightskyblue":      {0.529, 0.808, 0.980},
+	"lightslategray":    {0.467, 0.533, 0.600},
+	"lightslategrey":    {0.467, 0.533, 0.600},
+	"lightsteelblue":    {0.690, 0.769, 0.871},
+	"mediumaquamarine":  {0.400, 0.804, 0.667},
+	"mediumblue":        {0, 0, 0.804},
+	"mediumorchid":      {0.729, 0.333, 0.827},
+	"mediumpurple":      {0.576, 0.439, 0.859},
+	"mediumseagreen":    {0.235, 0.702, 0.443},
+	"mediumslateblue":   {0.482, 0.408, 0.933},
 	"mediumspringgreen": {0, 0.980, 0.604},
 	"mediumturquoise":   {0.282, 0.820, 0.800},
 	"mediumvioletred":   {0.780, 0.082, 0.522},
 	"midnightblue":      {0.098, 0.098, 0.439},
-	"mintcream":          {0.961, 1, 0.980},
-	"mistyrose":          {1, 0.894, 0.882},
-	"moccasin":           {1, 0.894, 0.710},
-	"navajowhite":        {1, 0.871, 0.678},
-	"oldlace":            {0.992, 0.961, 0.902},
-	"olivedrab":          {0.420, 0.557, 0.137},
-	"orangered":          {1, 0.271, 0},
-	"palegoldenrod":      {0.933, 0.910, 0.667},
-	"palegreen":          {0.596, 0.984, 0.596},
-	"paleturquoise":      {0.686, 0.933, 0.933},
-	"palevioletred":      {0.859, 0.439, 0.576},
-	"papayawhip":         {1, 0.937, 0.835},
-	"peachpuff":          {1, 0.855, 0.725},
-	"powderblue":         {0.690, 0.878, 0.902},
-	"rebeccapurple":      {0.400, 0.200, 0.600},
-	"rosybrown":          {0.737, 0.561, 0.561},
-	"saddlebrown":        {0.545, 0.271, 0.075},
-	"sandybrown":         {0.957, 0.643, 0.376},
-	"seagreen":           {0.180, 0.545, 0.341},
-	"seashell":           {1, 0.961, 0.933},
-	"sienna":             {0.627, 0.322, 0.176},
-	"snow":               {1, 0.980, 0.980},
-	"springgreen":        {0, 1, 0.498},
-	"tan":                {0.824, 0.706, 0.549},
-	"thistle":            {0.847, 0.749, 0.847},
+	"mintcream":         {0.961, 1, 0.980},
+	"mistyrose":         {1, 0.894, 0.882},
+	"moccasin":          {1, 0.894, 0.710},
+	"navajowhite":       {1, 0.871, 0.678},
+	"oldlace":           {0.992, 0.961, 0.902},
+	"olivedrab":         {0.420, 0.557, 0.137},
+	"orangered":         {1, 0.271, 0},
+	"palegoldenrod":     {0.933, 0.910, 0.667},
+	"palegreen":         {0.596, 0.984, 0.596},
+	"paleturquoise":     {0.686, 0.933, 0.933},
+	"palevioletred":     {0.859, 0.439, 0.576},
+	"papayawhip":        {1, 0.937, 0.835},
+	"peachpuff":         {1, 0.855, 0.725},
+	"powderblue":        {0.690, 0.878, 0.902},
+	"rebeccapurple":     {0.400, 0.200, 0.600},
+	"rosybrown":         {0.737, 0.561, 0.561},
+	"saddlebrown":       {0.545, 0.271, 0.075},
+	"sandybrown":        {0.957, 0.643, 0.376},
+	"seagreen":          {0.180, 0.545, 0.341},
+	"seashell":          {1, 0.961, 0.933},
+	"sienna":            {0.627, 0.322, 0.176},
+	"snow":              {1, 0.980, 0.980},
+	"springgreen":       {0, 1, 0.498},
+	"tan":               {0.824, 0.706, 0.549},
+	"thistle":           {0.847, 0.749, 0.847},
 }

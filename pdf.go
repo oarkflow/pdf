@@ -91,6 +91,9 @@ func FromHTML(htmlContent string, outputPath string, opts ...html.Options) error
 	if title, ok := result.Metadata["title"]; ok {
 		doc.SetMetadata(document.Metadata{Title: title})
 	}
+	if opt.Encryption != nil {
+		doc.SetEncryption(*opt.Encryption)
+	}
 
 	pages := layout.RenderPages(
 		result.Elements,
@@ -180,6 +183,9 @@ func FromHTMLStreaming(htmlContent string, out io.Writer, opts ...html.Options) 
 
 	if title, ok := result.Metadata["title"]; ok {
 		doc.SetMetadata(document.Metadata{Title: title})
+	}
+	if opt.Encryption != nil {
+		doc.SetEncryption(*opt.Encryption)
 	}
 
 	pages := layout.RenderPages(

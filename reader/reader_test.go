@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"fmt"
 	"testing"
+
+	"github.com/oarkflow/pdf/core"
+	"github.com/oarkflow/pdf/document"
 )
 
 // buildMinimalPDF creates a minimal valid PDF with one page and correct xref offsets.
@@ -152,5 +155,61 @@ func TestMetadataWithInfo(t *testing.T) {
 	}
 	if meta["Author"] != "Test Author" {
 		t.Errorf("Author = %q, want %q", meta["Author"], "Test Author")
+	}
+}
+
+func TestOpenWithPassword_AES128(t *testing.T) {
+	doc, err := document.NewDocument(document.A4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc.SetEncryption(core.EncryptionConfig{
+		Algorithm:     core.AES_128,
+		OwnerPassword: "owner-secret",
+		UserPassword:  "user-secret",
+		Permissions:   0xFFFFF0C4,
+	})
+	p := doc.NewPage()
+	p.Contents = []byte("BT /F1 12 Tf 100 700 Td (Hello Secret) Tj ET")
+
+	var buf bytes.Buffer
+	if _, err := doc.WriteTo(&buf); err != nil {
+		t.Fatalf("WriteTo: %v", err)
+	}
+
+	r, err := OpenWithPassword(buf.Bytes(), "user-secret")
+	if err != nil {
+		t.Fatalf("OpenWithPassword: %v", err)
+	}
+	text, err := r.ExtractText(0)
+	if err != nil {
+		t.Fatalf("ExtractText: %v", err)
+	}
+	if text != "Hello Secret" {
+		t.Fatalf("text = %q, want %q", text, "Hello Secret")
+	}
+}
+
+func TestOpenWithPassword_WrongPassword(t *testing.T) {
+	doc, err := document.NewDocument(document.A4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc.SetEncryption(core.EncryptionConfig{
+		Algorithm:     core.AES_128,
+		OwnerPassword: "owner-secret",
+		UserPassword:  "user-secret",
+		Permissions:   0xFFFFF0C4,
+	})
+	p := doc.NewPage()
+	p.Contents = []byte("BT /F1 12 Tf 100 700 Td (Nope) Tj ET")
+
+	var buf bytes.Buffer
+	if _, err := doc.WriteTo(&buf); err != nil {
+		t.Fatalf("WriteTo: %v", err)
+	}
+
+	if _, err := OpenWithPassword(buf.Bytes(), "wrong-password"); err == nil {
+		t.Fatal("expected password error")
 	}
 }

@@ -96,6 +96,21 @@ func TestParseInlineStyle_Important(t *testing.T) {
 	}
 }
 
+func TestParseInlineStyle_PreservesComplexValues(t *testing.T) {
+	style := `background: linear-gradient(135deg, var(--from) 0%, var(--to) 100%); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); content: "a:b;c";`
+	props := ParseInlineStyle(style)
+
+	if props["background-image"].Value != "linear-gradient(135deg, var(--from) 0%, var(--to) 100%)" {
+		t.Fatalf("background-image = %q", props["background-image"].Value)
+	}
+	if props["box-shadow"].Value != "0 10px 15px -3px rgba(0, 0, 0, 0.1)" {
+		t.Fatalf("box-shadow = %q", props["box-shadow"].Value)
+	}
+	if props["content"].Value != `"a:b;c"` {
+		t.Fatalf("content = %q", props["content"].Value)
+	}
+}
+
 func TestExpandShorthand_Margin(t *testing.T) {
 	tests := []struct {
 		value string
@@ -133,10 +148,10 @@ func TestExpandShorthand_Border(t *testing.T) {
 
 func TestExpandShorthand_Flex(t *testing.T) {
 	tests := []struct {
-		value    string
-		grow     string
-		shrink   string
-		basis    string
+		value  string
+		grow   string
+		shrink string
+		basis  string
 	}{
 		{"none", "0", "0", "auto"},
 		{"auto", "1", "1", "auto"},

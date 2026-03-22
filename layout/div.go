@@ -80,10 +80,10 @@ buildResult:
 	// Create the box drawing block
 	boxBlock := PlacedBlock{
 		X: 0, Y: 0,
-		Width:  outerWidth,
-		Height: totalConsumed,
-		Tag:    "Div",
-		Draw:   d.drawBox(outerWidth, totalConsumed),
+		Width:    outerWidth,
+		Height:   totalConsumed,
+		Tag:      "Div",
+		Draw:     d.drawBox(outerWidth, totalConsumed),
 		Children: childBlocks,
 	}
 
@@ -116,7 +116,6 @@ buildResult:
 
 func (d *Div) drawBox(width, height float64) func(ctx *DrawContext, x, pdfY float64) {
 	bg := d.Box.Background
-	borderColor := d.Box.BorderColor
 	borderTop := d.Box.BorderTopWidth
 	borderRight := d.Box.BorderRightWidth
 	borderBottom := d.Box.BorderBottomWidth
@@ -139,23 +138,37 @@ func (d *Div) drawBox(width, height float64) func(ctx *DrawContext, x, pdfY floa
 
 		// Draw borders
 		if borderTop > 0 || borderRight > 0 || borderBottom > 0 || borderLeft > 0 {
-			ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f RG\n", borderColor[0], borderColor[1], borderColor[2]))
 			if borderTop > 0 {
+				borderColor := resolveBorderColor(d.Box.BorderTopColor, d.Box.BorderColor)
+				ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f RG\n", borderColor[0], borderColor[1], borderColor[2]))
 				ctx.WriteString(fmt.Sprintf("%.2f w\n", borderTop))
 				ctx.WriteString(fmt.Sprintf("%.2f %.2f m %.2f %.2f l S\n", bx, by, bx+innerW, by))
 			}
 			if borderBottom > 0 {
+				borderColor := resolveBorderColor(d.Box.BorderBottomColor, d.Box.BorderColor)
+				ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f RG\n", borderColor[0], borderColor[1], borderColor[2]))
 				ctx.WriteString(fmt.Sprintf("%.2f w\n", borderBottom))
 				ctx.WriteString(fmt.Sprintf("%.2f %.2f m %.2f %.2f l S\n", bx, by-innerH, bx+innerW, by-innerH))
 			}
 			if borderLeft > 0 {
+				borderColor := resolveBorderColor(d.Box.BorderLeftColor, d.Box.BorderColor)
+				ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f RG\n", borderColor[0], borderColor[1], borderColor[2]))
 				ctx.WriteString(fmt.Sprintf("%.2f w\n", borderLeft))
 				ctx.WriteString(fmt.Sprintf("%.2f %.2f m %.2f %.2f l S\n", bx, by, bx, by-innerH))
 			}
 			if borderRight > 0 {
+				borderColor := resolveBorderColor(d.Box.BorderRightColor, d.Box.BorderColor)
+				ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f RG\n", borderColor[0], borderColor[1], borderColor[2]))
 				ctx.WriteString(fmt.Sprintf("%.2f w\n", borderRight))
 				ctx.WriteString(fmt.Sprintf("%.2f %.2f m %.2f %.2f l S\n", bx+innerW, by, bx+innerW, by-innerH))
 			}
 		}
 	}
+}
+
+func resolveBorderColor(sideColor, fallback [3]float64) [3]float64 {
+	if sideColor != ([3]float64{}) {
+		return sideColor
+	}
+	return fallback
 }

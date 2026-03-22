@@ -10,6 +10,9 @@ import (
 // applyEncryption adds encryption objects to the writer.
 func (d *Document) applyEncryption(w *Writer) error {
 	cfg := *d.encConfig
+	if cfg.Algorithm == core.AES_256 {
+		return fmt.Errorf("AES-256 PDF encryption is not supported yet; use AES-128")
+	}
 
 	// 1. Generate a random 16-byte document ID.
 	docID := make([]byte, 16)
@@ -63,7 +66,7 @@ func (d *Document) applyEncryption(w *Writer) error {
 	encDict.Set("R", core.PdfInteger(r))
 	encDict.Set("O", core.PdfHexString(oValue))
 	encDict.Set("U", core.PdfHexString(uValue))
-	encDict.Set("P", core.PdfInteger(int64(cfg.Permissions)))
+	encDict.Set("P", core.PdfInteger(int64(int32(cfg.Permissions))))
 
 	if cfg.Algorithm == AES_128 || cfg.Algorithm == AES_256 {
 		// Add CF (crypt filter) dictionary for AES

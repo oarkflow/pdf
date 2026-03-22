@@ -40,7 +40,7 @@ type PlacedBlock struct {
 // LinkAnnotation represents a clickable link region on a page.
 type LinkAnnotation struct {
 	X1, Y1, X2, Y2 float64 // rectangle in PDF coordinates (bottom-left origin)
-	URI             string
+	URI            string
 }
 
 // DrawContext provides drawing capabilities during rendering.
@@ -140,12 +140,17 @@ const (
 
 // BoxModel holds margin, padding, border for div-like elements.
 type BoxModel struct {
-	MarginTop, MarginRight, MarginBottom, MarginLeft             float64
-	PaddingTop, PaddingRight, PaddingBottom, PaddingLeft         float64
+	MarginTop, MarginRight, MarginBottom, MarginLeft                     float64
+	PaddingTop, PaddingRight, PaddingBottom, PaddingLeft                 float64
 	BorderTopWidth, BorderRightWidth, BorderBottomWidth, BorderLeftWidth float64
-	BorderColor  [3]float64
-	Background   *[3]float64 // nil means transparent
-	BorderRadius float64
+	BorderColor                                                          [3]float64
+	BorderTopColor, BorderRightColor, BorderBottomColor, BorderLeftColor [3]float64
+	Background                                                           *[3]float64 // nil means transparent
+	BackgroundImage                                                      string
+	BoxShadow                                                            string
+	BorderRadius                                                         float64
+	BorderTopLeftRadius, BorderTopRightRadius                            float64
+	BorderBottomRightRadius, BorderBottomLeftRadius                      float64
 }
 
 // TotalHorizontal returns total horizontal space consumed by the box model.

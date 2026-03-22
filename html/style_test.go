@@ -201,6 +201,41 @@ func TestApply_CustomProperties(t *testing.T) {
 	}
 }
 
+func TestApply_BorderRadiusShorthand(t *testing.T) {
+	s := NewDefaultStyle()
+	s.Apply(map[string]CSSValue{
+		"border-radius": {Value: "0 0 6px 6px"},
+	}, nil, 12)
+
+	if s.BorderTopLeftRadius != 0 || s.BorderTopRightRadius != 0 {
+		t.Fatalf("top radii = (%v, %v), want (0, 0)", s.BorderTopLeftRadius, s.BorderTopRightRadius)
+	}
+	if math.Abs(s.BorderBottomRightRadius-4.5) > 0.01 || math.Abs(s.BorderBottomLeftRadius-4.5) > 0.01 {
+		t.Fatalf("bottom radii = (%v, %v), want (4.5, 4.5)", s.BorderBottomRightRadius, s.BorderBottomLeftRadius)
+	}
+	if math.Abs(s.BorderRadius-4.5) > 0.01 {
+		t.Fatalf("BorderRadius = %v, want 4.5", s.BorderRadius)
+	}
+}
+
+func TestApply_ResolvesGradientAndShadowVariables(t *testing.T) {
+	s := NewDefaultStyle()
+	s.Apply(map[string]CSSValue{
+		"--from":           {Value: "#667eea"},
+		"--to":             {Value: "#764ba2"},
+		"--card-shadow":    {Value: "0 10px 15px -3px rgba(0, 0, 0, 0.1)"},
+		"background-image": {Value: "linear-gradient(135deg, var(--from) 0%, var(--to) 100%)"},
+		"box-shadow":       {Value: "var(--card-shadow)"},
+	}, nil, 12)
+
+	if s.BackgroundImage != "linear-gradient(135deg, #667eea 0%, #764ba2 100%)" {
+		t.Fatalf("BackgroundImage = %q", s.BackgroundImage)
+	}
+	if s.BoxShadow != "0 10px 15px -3px rgba(0, 0, 0, 0.1)" {
+		t.Fatalf("BoxShadow = %q", s.BoxShadow)
+	}
+}
+
 func TestApply_VarFallback(t *testing.T) {
 	s := NewDefaultStyle()
 	props := map[string]CSSValue{

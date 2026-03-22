@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+
+	"github.com/oarkflow/pdf/core"
 )
 
 // PageInfo holds information about a single PDF page.
@@ -24,6 +26,12 @@ type Reader struct {
 
 // Open parses the PDF data and returns a Reader.
 func Open(data []byte) (*Reader, error) {
+	return OpenWithPassword(data, "")
+}
+
+// OpenWithPassword parses the PDF data and authenticates encrypted documents
+// using the supplied user or owner password.
+func OpenWithPassword(data []byte, password string) (*Reader, error) {
 	if len(data) == 0 {
 		return nil, errors.New("reader: data is empty")
 	}
@@ -34,6 +42,10 @@ func Open(data []byte) (*Reader, error) {
 
 	trailer, err := resolver.Trailer()
 	if err != nil {
+		return nil, fmt.Errorf("reader: %w", err)
+	}
+
+	if err := configureDecryption(resolver, trailer, password); err != nil {
 		return nil, fmt.Errorf("reader: %w", err)
 	}
 
@@ -62,11 +74,16 @@ func Open(data []byte) (*Reader, error) {
 
 // OpenFile reads a PDF file and returns a Reader.
 func OpenFile(path string) (*Reader, error) {
+	return OpenFileWithPassword(path, "")
+}
+
+// OpenFileWithPassword reads a PDF file and returns a Reader.
+func OpenFileWithPassword(path string, password string) (*Reader, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	return Open(data)
+	return OpenWithPassword(data, password)
 }
 
 // NumPages returns the number of pages in the document.
@@ -213,6 +230,84 @@ func (r *Reader) Catalog() map[string]interface{} {
 // GetResolver returns the underlying resolver for advanced use.
 func (r *Reader) GetResolver() *Resolver {
 	return r.resolver
+}
+
+func configureDecryption(resolver *Resolver, trailer map[string]interface{}, password string) error {
+	encRef, ok := trailer["/Encrypt"]
+	if !ok {
+		return nil
+	}
+
+	ref, ok := encRef.(IndirectRef)
+	if !ok {
+		return fmt.Errorf("invalid /Encrypt reference")
+	}
+	encObj, err := resolver.ResolveObject(ref.ObjNum)
+	if err != nil {
+		return fmt.Errorf("resolving /Encrypt: %w", err)
+	}
+	encDict, ok := encObj.(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("/Encrypt is not a dictionary")
+	}
+
+	v, _ := getInt(encDict, "/V")
+	if v == 5 {
+		return fmt.Errorf("AES-256 encrypted PDFs are not supported yet")
+	}
+
+	var algorithm core.EncryptionAlgorithm
+	switch v {
+	case 2:
+		algorithm = core.RC4_128
+	case 4:
+		algorithm = core.AES_128
+	default:
+		return fmt.Errorf("unsupported encryption version %d", v)
+	}
+
+	oValue, ok := encDict["/O"].(string)
+	if !ok {
+		return fmt.Errorf("missing /O in encryption dictionary")
+	}
+	uValue, ok := encDict["/U"].(string)
+	if !ok {
+		return fmt.Errorf("missing /U in encryption dictionary")
+	}
+	pInt, ok := getInt(encDict, "/P")
+	if !ok {
+		return fmt.Errorf("missing /P in encryption dictionary")
+	}
+
+	idArr, ok := trailer["/ID"].([]interface{})
+	if !ok || len(idArr) == 0 {
+		return fmt.Errorf("missing trailer /ID")
+	}
+	docID, ok := idArr[0].(string)
+	if !ok {
+		return fmt.Errorf("invalid trailer /ID")
+	}
+
+	key, matched, err := core.AuthenticateUserPassword(password, algorithm, []byte(oValue), []byte(uValue), uint32(pInt), []byte(docID))
+	if err != nil {
+		return err
+	}
+	if !matched {
+		key, matched, err = core.AuthenticateOwnerPassword(password, algorithm, []byte(oValue), []byte(uValue), uint32(pInt), []byte(docID))
+		if err != nil {
+			return err
+		}
+	}
+	if !matched {
+		return fmt.Errorf("invalid password for encrypted PDF")
+	}
+
+	resolver.crypt = &decryptState{
+		key:           key,
+		algorithm:     algorithm,
+		encryptObjNum: ref.ObjNum,
+	}
+	return nil
 }
 
 func (r *Reader) buildPageList() error {

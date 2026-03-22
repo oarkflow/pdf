@@ -101,6 +101,27 @@ func TestConvert_FlexLayout(t *testing.T) {
 	}
 }
 
+func TestConvert_FlexLayoutPreservesEmptySpacer(t *testing.T) {
+	html := `<html><body><div style="display: flex"><div style="flex: 2"></div><div style="flex: 1; border: 1px solid #000">Totals</div></div></body></html>`
+	result, err := Convert(html, Options{})
+	if err != nil {
+		t.Fatalf("Convert() error = %v", err)
+	}
+	if len(result.Elements) != 1 {
+		t.Fatalf("got %d top-level elements, want 1", len(result.Elements))
+	}
+	flex, ok := result.Elements[0].(*FlexContainerElement)
+	if !ok {
+		t.Fatalf("top-level element = %T, want *FlexContainerElement", result.Elements[0])
+	}
+	if len(flex.Children) != 2 {
+		t.Fatalf("got %d flex children, want 2", len(flex.Children))
+	}
+	if _, ok := flex.Children[0].Element.(*DivElement); !ok {
+		t.Fatalf("spacer element = %T, want *DivElement", flex.Children[0].Element)
+	}
+}
+
 func TestConvert_GridLayout(t *testing.T) {
 	html := `<html><body><div style="display: grid; grid-template-columns: 1fr 1fr"><div>A</div><div>B</div></div></body></html>`
 	result, err := Convert(html, Options{})
@@ -134,6 +155,30 @@ func TestConvert_UserStylesheet(t *testing.T) {
 	}
 	if result == nil {
 		t.Fatal("result is nil")
+	}
+}
+
+func TestConvert_StyleTagAppliesBorderRadiusShorthand(t *testing.T) {
+	html := `<!DOCTYPE html><html><head><style>.totals-box { border-radius: 0 0 6px 6px; overflow: hidden; background-color: #f8f9fb; }</style></head><body><div class="totals-box">Totals</div></body></html>`
+	result, err := Convert(html, Options{})
+	if err != nil {
+		t.Fatalf("Convert() error = %v", err)
+	}
+	if len(result.Elements) != 1 {
+		t.Fatalf("elements = %d, want 1", len(result.Elements))
+	}
+	div, ok := result.Elements[0].(*DivElement)
+	if !ok {
+		t.Fatalf("element type = %T, want *DivElement", result.Elements[0])
+	}
+	if div.BoxModel.BorderTopLeftRadius != 0 || div.BoxModel.BorderTopRightRadius != 0 {
+		t.Fatalf("top radii = (%v, %v), want (0, 0)", div.BoxModel.BorderTopLeftRadius, div.BoxModel.BorderTopRightRadius)
+	}
+	if div.BoxModel.BorderBottomRightRadius <= 0 || div.BoxModel.BorderBottomLeftRadius <= 0 {
+		t.Fatalf("expected bottom radii > 0, got (%v, %v)", div.BoxModel.BorderBottomRightRadius, div.BoxModel.BorderBottomLeftRadius)
+	}
+	if div.Style == nil || div.Style.Overflow != "hidden" {
+		t.Fatalf("overflow = %q, want hidden", div.Style.Overflow)
 	}
 }
 
@@ -215,5 +260,51 @@ func TestCollapseWhitespace(t *testing.T) {
 				t.Errorf("collapseWhitespace(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestComputeBoxModel_SuppressesHiddenBorders(t *testing.T) {
+	style := NewDefaultStyle()
+	style.Apply(ParseInlineStyle("border: 1px solid #000; border-top: none"), nil, 12)
+
+	c := &converter{rootFontSize: 12}
+	box := c.computeBoxModel(style)
+
+	if box.BorderTopWidth != 0 {
+		t.Fatalf("BorderTopWidth = %v, want 0", box.BorderTopWidth)
+	}
+	if box.BorderRightWidth == 0 || box.BorderBottomWidth == 0 || box.BorderLeftWidth == 0 {
+		t.Fatalf("expected remaining borders to stay visible, got right=%v bottom=%v left=%v", box.BorderRightWidth, box.BorderBottomWidth, box.BorderLeftWidth)
+	}
+}
+
+func TestComputeBoxModel_PreservesVisibleBorderColorsWhenTopIsHidden(t *testing.T) {
+	style := NewDefaultStyle()
+	style.Apply(ParseInlineStyle("border: 1px solid #eaedf1; border-top: none"), nil, 12)
+
+	c := &converter{rootFontSize: 12}
+	box := c.computeBoxModel(style)
+
+	want := [3]float64{0.9176470588235294, 0.9294117647058824, 0.9450980392156862}
+	if box.BorderRightColor != want || box.BorderBottomColor != want || box.BorderLeftColor != want {
+		t.Fatalf("visible border colors = right:%v bottom:%v left:%v, want %v", box.BorderRightColor, box.BorderBottomColor, box.BorderLeftColor, want)
+	}
+	if box.BorderColor != want {
+		t.Fatalf("fallback border color = %v, want %v", box.BorderColor, want)
+	}
+}
+
+func TestComputeBoxModel_PreservesCornerRadii(t *testing.T) {
+	style := NewDefaultStyle()
+	style.Apply(ParseInlineStyle("border-radius: 0 0 6px 6px"), nil, 12)
+
+	c := &converter{rootFontSize: 12}
+	box := c.computeBoxModel(style)
+
+	if box.BorderTopLeftRadius != 0 || box.BorderTopRightRadius != 0 {
+		t.Fatalf("top radii = (%v, %v), want (0, 0)", box.BorderTopLeftRadius, box.BorderTopRightRadius)
+	}
+	if box.BorderBottomRightRadius <= 0 || box.BorderBottomLeftRadius <= 0 {
+		t.Fatalf("expected bottom radii > 0, got (%v, %v)", box.BorderBottomRightRadius, box.BorderBottomLeftRadius)
 	}
 }

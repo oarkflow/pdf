@@ -45,18 +45,18 @@ const (
 //
 // Document is not safe for concurrent use. Callers must synchronize access externally.
 type Document struct {
-	pageSize    PageSize
-	margins     Margins
-	pages       []*Page
-	metadata    Metadata
-	header      PageDecorator
-	footer      PageDecorator
-	watermark   *WatermarkConfig
-	pdfaLevel   *PDFALevel
-	encConfig   *core.EncryptionConfig
-	outline     *Outline
-	tagged      bool
-	structTree  *StructureTree
+	pageSize   PageSize
+	margins    Margins
+	pages      []*Page
+	metadata   Metadata
+	header     PageDecorator
+	footer     PageDecorator
+	watermark  *WatermarkConfig
+	pdfaLevel  *PDFALevel
+	encConfig  *core.EncryptionConfig
+	outline    *Outline
+	tagged     bool
+	structTree *StructureTree
 }
 
 // NewDocument creates a new document with the given page size and default margins.
@@ -70,21 +70,21 @@ func NewDocument(pageSize PageSize) (*Document, error) {
 	}, nil
 }
 
-func (d *Document) SetMargins(m Margins)              { d.margins = m }
+func (d *Document) SetMargins(m Margins) { d.margins = m }
 func (d *Document) AddPage(p *Page) {
 	if p == nil {
 		return
 	}
 	d.pages = append(d.pages, p)
 }
-func (d *Document) SetHeader(fn PageDecorator)         { d.header = fn }
-func (d *Document) SetFooter(fn PageDecorator)         { d.footer = fn }
-func (d *Document) SetWatermark(cfg WatermarkConfig)   { d.watermark = &cfg }
-func (d *Document) SetMetadata(meta Metadata)          { d.metadata = meta }
+func (d *Document) SetHeader(fn PageDecorator)              { d.header = fn }
+func (d *Document) SetFooter(fn PageDecorator)              { d.footer = fn }
+func (d *Document) SetWatermark(cfg WatermarkConfig)        { d.watermark = &cfg }
+func (d *Document) SetMetadata(meta Metadata)               { d.metadata = meta }
 func (d *Document) SetEncryption(cfg core.EncryptionConfig) { d.encConfig = &cfg }
-func (d *Document) Pages() []*Page                     { return d.pages }
-func (d *Document) PageSize() PageSize                 { return d.pageSize }
-func (d *Document) Margins() Margins                   { return d.margins }
+func (d *Document) Pages() []*Page                          { return d.pages }
+func (d *Document) PageSize() PageSize                      { return d.pageSize }
+func (d *Document) Margins() Margins                        { return d.margins }
 
 // SetPDFA sets the target PDF/A conformance level.
 func (d *Document) SetPDFA(level PDFALevel) {
@@ -235,6 +235,11 @@ func (d *Document) WriteTo(w io.Writer) (int64, error) {
 // WriteStreamingTo serializes the document directly to w without buffering the
 // entire PDF in memory. This is more memory-efficient for large documents.
 func (d *Document) WriteStreamingTo(w io.Writer) error {
+	if d.encConfig != nil {
+		_, err := d.WriteTo(w)
+		return err
+	}
+
 	sw, err := NewStreamingWriter(w)
 	if err != nil {
 		return err

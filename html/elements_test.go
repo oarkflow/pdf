@@ -130,6 +130,46 @@ func TestDivElementPaginatesOverflow(t *testing.T) {
 	}
 }
 
+func TestDivElementOverflowHiddenClipsChildren(t *testing.T) {
+	el := &DivElement{
+		Style: &ComputedStyle{Overflow: "hidden"},
+		BoxModel: layout.BoxModel{
+			BorderRadius: 6,
+		},
+		Children: []layout.Element{
+			testElement{
+				plan: layout.LayoutPlan{
+					Status:   layout.LayoutFull,
+					Consumed: 20,
+					Blocks: []layout.PlacedBlock{{
+						Width:  80,
+						Height: 20,
+						Draw: func(ctx *layout.DrawContext, x, topY float64) {
+							ctx.WriteString("% child\n")
+						},
+					}},
+				},
+			},
+		},
+	}
+
+	plan := el.PlanLayout(layout.LayoutArea{Width: 100, Height: 100})
+	ctx := layout.NewDrawContext(200, 200)
+	for _, block := range plan.Blocks {
+		if block.Draw != nil {
+			block.Draw(ctx, 10, 150)
+		}
+	}
+
+	stream := string(ctx.ContentStream)
+	if !strings.Contains(stream, "W n") {
+		t.Fatalf("expected clip path in stream, got:\n%s", stream)
+	}
+	if !strings.Contains(stream, "Q\n") {
+		t.Fatalf("expected clip restore in stream, got:\n%s", stream)
+	}
+}
+
 func TestToWinAnsiEmitsSingleByteCopyright(t *testing.T) {
 	got := []byte(toWinAnsi("©"))
 	if len(got) != 1 {
@@ -173,5 +213,47 @@ func TestConvertTreatsStyledInlineBlockAsInlineBox(t *testing.T) {
 	}
 	if btn.OuterAlign != "center" {
 		t.Fatalf("outer align = %q, want center", btn.OuterAlign)
+	}
+}
+
+func TestDrawBoxModelFallsBackForAsymmetricRoundedBorders(t *testing.T) {
+	ctx := layout.NewDrawContext(200, 200)
+	drawBoxModel(ctx, 10, 180, 80, 40, layout.BoxModel{
+		BorderTopWidth:    0,
+		BorderRightWidth:  1,
+		BorderBottomWidth: 1,
+		BorderLeftWidth:   1,
+		BorderColor:       [3]float64{0.5, 0.5, 0.5},
+		BorderRightColor:  [3]float64{0.918, 0.929, 0.945},
+		BorderBottomColor: [3]float64{0.918, 0.929, 0.945},
+		BorderLeftColor:   [3]float64{0.918, 0.929, 0.945},
+		BorderRadius:      6,
+	})
+
+	stream := string(ctx.ContentStream)
+	if strings.Contains(stream, " c ") {
+		t.Fatalf("expected asymmetric borders to avoid rounded rectangle stroke, got:\n%s", stream)
+	}
+	if strings.Contains(stream, " 0.00 w ") {
+		t.Fatalf("expected hidden top border to stay omitted, got:\n%s", stream)
+	}
+	if !strings.Contains(stream, "0.918 0.929 0.945 RG") {
+		t.Fatalf("expected visible borders to use light gray stroke, got:\n%s", stream)
+	}
+}
+
+func TestDrawBoxModelRendersGradientAndShadow(t *testing.T) {
+	ctx := layout.NewDrawContext(200, 200)
+	drawBoxModel(ctx, 10, 180, 100, 50, layout.BoxModel{
+		BackgroundImage: "linear-gradient(90deg, #667eea 0%, #764ba2 100%)",
+		BoxShadow:       "4px 6px 8px #d1d5db",
+	})
+
+	stream := string(ctx.ContentStream)
+	if !strings.Contains(stream, "0.820 0.835 0.859 rg") {
+		t.Fatalf("expected shadow color in stream, got:\n%s", stream)
+	}
+	if count := strings.Count(stream, " re f\n"); count < 10 {
+		t.Fatalf("expected gradient strips in stream, got count=%d\n%s", count, stream)
 	}
 }
