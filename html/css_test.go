@@ -47,6 +47,22 @@ func TestParseCSS_MediaRule(t *testing.T) {
 	}
 }
 
+func TestParseCSS_LayerRule(t *testing.T) {
+	sheet, err := ParseCSS(`@layer utilities { .aspect-9\/10 { aspect-ratio: 9 / 10; } }`)
+	if err != nil {
+		t.Fatalf("ParseCSS() error = %v", err)
+	}
+	if len(sheet.Rules) != 1 {
+		t.Fatalf("got %d rules, want 1", len(sheet.Rules))
+	}
+	if len(sheet.Rules[0].Selectors) == 0 || len(sheet.Rules[0].Selectors[0].Classes) == 0 {
+		t.Fatal("expected parsed class selector inside @layer")
+	}
+	if got := sheet.Rules[0].Selectors[0].Classes[0]; got != "aspect-9/10" {
+		t.Fatalf("class = %q, want aspect-9/10", got)
+	}
+}
+
 func TestParseCSS_FontFace(t *testing.T) {
 	css := `@font-face { font-family: "MyFont"; src: url(font.woff); font-weight: bold; }`
 	sheet, _ := ParseCSS(css)
@@ -211,6 +227,17 @@ func TestSelectorMatching(t *testing.T) {
 		{"#other", root, false},
 		{".text", p, true},
 		{"p.text", p, true},
+		{".sm\\:px-8", func() *Node {
+			n := CreateElement("div")
+			n.SetAttribute("class", "sm:px-8")
+			return n
+		}(), true},
+		{".aspect-9\\/10", func() *Node {
+			n := CreateElement("div")
+			n.SetAttribute("class", "aspect-9/10")
+			return n
+		}(), true},
+		{"div:bogus", root, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.sel, func(t *testing.T) {
@@ -223,6 +250,28 @@ func TestSelectorMatching(t *testing.T) {
 				t.Errorf("Matches() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestSelectorMatching_WherePseudoClass(t *testing.T) {
+	root := CreateElement("div")
+	root.SetAttribute("class", "dark")
+	child := CreateElement("div")
+	child.SetAttribute("class", "dark:bg-zinc-900")
+	root.AppendChild(child)
+
+	sels, err := ParseSelector(`.dark\:bg-zinc-900:where(.dark *)`)
+	if err != nil || len(sels) == 0 {
+		t.Fatal("failed to parse selector")
+	}
+	if !sels[0].Matches(child) {
+		t.Fatal("expected :where(.dark *) selector to match descendant of .dark")
+	}
+
+	other := CreateElement("div")
+	other.SetAttribute("class", "dark:bg-zinc-900")
+	if sels[0].Matches(other) {
+		t.Fatal("expected selector to fail without .dark ancestor")
 	}
 }
 

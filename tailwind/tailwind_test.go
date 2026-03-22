@@ -30,6 +30,24 @@ func TestParser_Display(t *testing.T) {
 	}
 }
 
+func TestParser_AspectRatio(t *testing.T) {
+	p := tailwind.New()
+	tests := []struct {
+		class string
+		want  string
+	}{
+		{"aspect-square", "1 / 1"},
+		{"aspect-video", "16 / 9"},
+		{"aspect-9/10", "9 / 10"},
+	}
+	for _, tt := range tests {
+		got := p.Parse(tt.class)
+		if got["aspect-ratio"] != tt.want {
+			t.Errorf("class=%q: aspect-ratio = %v, want %q", tt.class, got["aspect-ratio"], tt.want)
+		}
+	}
+}
+
 func TestParser_Spacing(t *testing.T) {
 	p := tailwind.New()
 	tests := []struct {

@@ -95,6 +95,8 @@ func (p *cssParser) parseAtRule(sheet *Stylesheet) {
 	switch strings.ToLower(keyword) {
 	case "media":
 		p.parseMediaRule(sheet)
+	case "layer", "supports":
+		p.parseNestedAtRule(sheet)
 	case "font-face":
 		p.parseFontFace(sheet)
 	case "page":
@@ -124,6 +126,54 @@ func (p *cssParser) parseAtRule(sheet *Stylesheet) {
 			p.pos++
 		}
 	}
+}
+
+func (p *cssParser) parseNestedAtRule(sheet *Stylesheet) {
+	p.skipWhitespaceAndComments()
+	if p.pos >= len(p.input) {
+		return
+	}
+
+	// Skip prelude up to the next block or semicolon.
+	start := p.pos
+	for p.pos < len(p.input) && p.input[p.pos] != '{' && p.input[p.pos] != ';' {
+		p.pos++
+	}
+	if p.pos >= len(p.input) || p.input[p.pos] == ';' {
+		if p.pos < len(p.input) {
+			p.pos++
+		}
+		_ = start
+		return
+	}
+
+	p.pos++ // skip {
+	depth := 1
+	contentStart := p.pos
+	for p.pos < len(p.input) && depth > 0 {
+		switch p.input[p.pos] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+		}
+		if depth > 0 {
+			p.pos++
+		}
+	}
+	content := p.input[contentStart:p.pos]
+	if p.pos < len(p.input) {
+		p.pos++ // skip }
+	}
+
+	innerParser := &cssParser{input: content, pos: 0}
+	innerSheet, _ := innerParser.parse()
+	if innerSheet == nil {
+		return
+	}
+	sheet.Rules = append(sheet.Rules, innerSheet.Rules...)
+	sheet.FontFaces = append(sheet.FontFaces, innerSheet.FontFaces...)
+	sheet.Pages = append(sheet.Pages, innerSheet.Pages...)
 }
 
 func (p *cssParser) parseMediaRule(sheet *Stylesheet) {

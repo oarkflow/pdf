@@ -103,6 +103,7 @@ func TestParseColor(t *testing.T) {
 		{"rgb(100%, 0%, 0%)", true, 1},
 		{"black", true, 0},
 		{"transparent", false, 0},
+		{"#0000", false, 0},
 		{"", false, 0},
 		{"currentcolor", false, 0},
 	}
@@ -202,6 +203,16 @@ func TestApply_BasicProperties(t *testing.T) {
 	}
 }
 
+func TestApply_FlexOrder(t *testing.T) {
+	s := NewDefaultStyle()
+	s.Apply(map[string]CSSValue{
+		"order": {Value: "-9999"},
+	}, nil, 12)
+	if s.Order != -9999 {
+		t.Fatalf("Order = %d, want -9999", s.Order)
+	}
+}
+
 func TestApply_CustomProperties(t *testing.T) {
 	s := NewDefaultStyle()
 	props := map[string]CSSValue{
@@ -228,6 +239,30 @@ func TestApply_BorderRadiusShorthand(t *testing.T) {
 	}
 	if math.Abs(s.BorderRadius-4.5) > 0.01 {
 		t.Fatalf("BorderRadius = %v, want 4.5", s.BorderRadius)
+	}
+}
+
+func TestApply_AspectRatio(t *testing.T) {
+	s := NewDefaultStyle()
+	s.Apply(map[string]CSSValue{
+		"aspect-ratio": {Value: "9 / 10"},
+	}, nil, 12)
+	if math.Abs(s.AspectRatio-0.9) > 0.0001 {
+		t.Fatalf("AspectRatio = %.4f, want 0.9", s.AspectRatio)
+	}
+}
+
+func TestApply_Transform(t *testing.T) {
+	s := NewDefaultStyle()
+	s.Apply(map[string]CSSValue{
+		"transform":        {Value: "rotate(2deg) scaleX(1.1)"},
+		"transform-origin": {Value: "center"},
+	}, nil, 12)
+	if s.Transform == "" {
+		t.Fatal("expected transform to be applied")
+	}
+	if s.TransformOrigin != "center" {
+		t.Fatalf("origin = %q", s.TransformOrigin)
 	}
 }
 

@@ -36,6 +36,7 @@ func RenderPages(elements []Element, pageWidth, pageHeight, marginTop, marginRig
 			})
 		}
 		currentCtx = NewDrawContext(pageWidth, pageHeight)
+		currentCtx.WriteString(fmt.Sprintf("1 1 1 rg 0 0 %.2f %.2f re f\n", pageWidth, pageHeight))
 		cursorY = 0
 		remaining = availHeight
 	}

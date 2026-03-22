@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -127,16 +128,28 @@ func (e *DivElement) PlanLayout(area layout.LayoutArea) layout.LayoutPlan {
 	if contentHeight < 0 {
 		return layout.LayoutPlan{Status: layout.LayoutNothing}
 	}
+	targetContentHeight := e.resolveContentHeight(innerWidth, contentHeight)
+	childHeight := contentHeight
+	if targetContentHeight > 0 && (childHeight == 0 || targetContentHeight < childHeight) {
+		childHeight = targetContentHeight
+	}
 
 	var childBlocks []layout.PlacedBlock
 	childY := 0.0
-	remaining := contentHeight
+	remaining := childHeight
 	var overflowChildren []layout.Element
 
 	for i, child := range e.Children {
 		childPlan := child.PlanLayout(layout.LayoutArea{Width: innerWidth, Height: remaining})
 		switch childPlan.Status {
 		case layout.LayoutFull:
+			if childPlan.Consumed > remaining {
+				if childY == 0 {
+					return layout.LayoutPlan{Status: layout.LayoutNothing}
+				}
+				overflowChildren = e.Children[i:]
+				goto buildResult
+			}
 			for _, b := range childPlan.Blocks {
 				b.X += bm.ContentLeft()
 				b.Y += bm.ContentTop() + childY
@@ -163,6 +176,9 @@ func (e *DivElement) PlanLayout(area layout.LayoutArea) layout.LayoutPlan {
 	}
 
 buildResult:
+	if targetContentHeight > childY {
+		childY = targetContentHeight
+	}
 	totalHeight := childY + bm.TotalVertical()
 	w := area.Width
 
@@ -201,6 +217,7 @@ buildResult:
 	} else {
 		allBlocks = append(allBlocks, childBlocks...)
 	}
+	allBlocks = wrapBlocksWithTransform(e.Style, allBlocks, w, totalHeight)
 
 	if len(overflowChildren) > 0 {
 		overflowDiv := &DivElement{
@@ -225,6 +242,34 @@ buildResult:
 		Consumed: totalHeight,
 		Blocks:   allBlocks,
 	}
+}
+
+func (e *DivElement) resolveContentHeight(innerWidth, availableHeight float64) float64 {
+	if e.Style == nil {
+		return 0
+	}
+	contentHeight := 0.0
+	if !e.Style.Height.IsAuto() && e.Style.Height.Value > 0 {
+		contentHeight = e.Style.Height.ToPoints(availableHeight, e.Style.FontSize)
+	} else if e.Style.AspectRatio > 0 && innerWidth > 0 {
+		contentHeight = innerWidth / e.Style.AspectRatio
+	}
+	if contentHeight <= 0 {
+		return 0
+	}
+	if !e.Style.MinHeight.IsAuto() && e.Style.MinHeight.Value > 0 {
+		minH := e.Style.MinHeight.ToPoints(availableHeight, e.Style.FontSize)
+		if contentHeight < minH {
+			contentHeight = minH
+		}
+	}
+	if !e.Style.MaxHeight.IsAuto() && e.Style.MaxHeight.Value > 0 {
+		maxH := e.Style.MaxHeight.ToPoints(availableHeight, e.Style.FontSize)
+		if maxH > 0 && contentHeight > maxH {
+			contentHeight = maxH
+		}
+	}
+	return contentHeight
 }
 
 func (e *InlineBoxElement) PlanLayout(area layout.LayoutArea) layout.LayoutPlan {
@@ -351,12 +396,19 @@ type ListElement struct {
 func (e *ListElement) PlanLayout(area layout.LayoutArea) layout.LayoutPlan {
 	fontSize := 12.0
 	lineHeight := 16.8
-	if e.Style != nil {
+	if e.Style != nil && e.Style.FontSize > 0 {
 		fontSize = e.Style.FontSize
+	}
+	if e.Style != nil && e.Style.FontSize > 0 && e.Style.LineHeight > 0 {
 		lineHeight = e.Style.FontSize * e.Style.LineHeight
 	}
 	bm := e.BoxModel
 	indent := 20.0
+	showMarker := true
+	if e.Style != nil && strings.TrimSpace(strings.ToLower(e.Style.ListStyleType)) == "none" {
+		showMarker = false
+		indent = 0
+	}
 	consumed := bm.ContentTop()
 	var blocks []layout.PlacedBlock
 
@@ -373,19 +425,59 @@ func (e *ListElement) PlanLayout(area layout.LayoutArea) layout.LayoutPlan {
 			cColor = e.Style.Color
 		}
 
-		block := layout.PlacedBlock{
-			X: 0, Y: cY, Width: area.Width, Height: cLH, Tag: "LI",
-			Draw: func(ctx *layout.DrawContext, x, topY float64) {
-				fn := resolveFontName(cFS, false, false)
-				ensureFont(ctx, fn)
-				ctx.WriteString(fmt.Sprintf("BT\n/%s %.1f Tf\n%.3f %.3f %.3f rg\n%.2f %.2f Td\n(%s) Tj\nET\n",
-					fn, cFS, cColor[0], cColor[1], cColor[2],
-					x+cBm.ContentLeft(), topY-cFS, escPDF(cMarker)))
-				drawTextRuns(ctx, cRuns, x+cBm.ContentLeft()+indent, topY, cFS, cLH)
-			},
+		itemHeight := cLH
+		if len(item.Children) > 0 {
+			itemHeight = 0
+			childY := 0.0
+			childWidth := area.Width - cBm.TotalHorizontal() - indent
+			if childWidth < 0 {
+				childWidth = 0
+			}
+			for _, child := range item.Children {
+				plan := child.PlanLayout(layout.LayoutArea{Width: childWidth, Height: area.Height - consumed - childY})
+				for _, b := range plan.Blocks {
+					b.X += cBm.ContentLeft() + indent
+					b.Y += cY + childY
+					blocks = append(blocks, b)
+				}
+				childY += plan.Consumed
+			}
+			if childY > itemHeight {
+				itemHeight = childY
+			}
 		}
-		blocks = append(blocks, block)
-		consumed += lineHeight
+		if len(cRuns) > 0 {
+			block := layout.PlacedBlock{
+				X: 0, Y: cY, Width: area.Width, Height: itemHeight, Tag: "LI",
+				Draw: func(ctx *layout.DrawContext, x, topY float64) {
+					if showMarker && cMarker != "" {
+						fn := resolveFontName(cFS, false, false)
+						ensureFont(ctx, fn)
+						ctx.WriteString(fmt.Sprintf("BT\n/%s %.1f Tf\n%.3f %.3f %.3f rg\n%.2f %.2f Td\n(%s) Tj\nET\n",
+							fn, cFS, cColor[0], cColor[1], cColor[2],
+							x+cBm.ContentLeft(), topY-cFS, escPDF(cMarker)))
+					}
+					drawTextRuns(ctx, cRuns, x+cBm.ContentLeft()+indent, topY, cFS, cLH)
+				},
+			}
+			blocks = append(blocks, block)
+		} else if showMarker && cMarker != "" {
+			block := layout.PlacedBlock{
+				X: 0, Y: cY, Width: area.Width, Height: itemHeight, Tag: "LI",
+				Draw: func(ctx *layout.DrawContext, x, topY float64) {
+					fn := resolveFontName(cFS, false, false)
+					ensureFont(ctx, fn)
+					ctx.WriteString(fmt.Sprintf("BT\n/%s %.1f Tf\n%.3f %.3f %.3f rg\n%.2f %.2f Td\n(%s) Tj\nET\n",
+						fn, cFS, cColor[0], cColor[1], cColor[2],
+						x+cBm.ContentLeft(), topY-cFS, escPDF(cMarker)))
+				},
+			}
+			blocks = append(blocks, block)
+		}
+		if itemHeight <= 0 {
+			itemHeight = lineHeight
+		}
+		consumed += itemHeight
 	}
 	consumed += bm.PaddingBottom + bm.BorderBottomWidth + bm.MarginBottom
 
@@ -957,13 +1049,34 @@ type FlexContainerElement struct {
 	BoxModel layout.BoxModel
 }
 
+func orderedFlexChildren(children []FlexChildElement) []FlexChildElement {
+	ordered := append([]FlexChildElement(nil), children...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		left := 0
+		if ordered[i].Style != nil {
+			left = ordered[i].Style.Order
+		}
+		right := 0
+		if ordered[j].Style != nil {
+			right = ordered[j].Style.Order
+		}
+		return left < right
+	})
+	return ordered
+}
+
 func (e *FlexContainerElement) PlanLayout(area layout.LayoutArea) layout.LayoutPlan {
 	bm := e.BoxModel
 	innerWidth := area.Width - bm.TotalHorizontal()
+	innerHeight := area.Height - bm.TotalVertical()
+	if innerHeight < 0 {
+		return layout.LayoutPlan{Status: layout.LayoutNothing}
+	}
 	consumed := bm.ContentTop()
 	var blocks []layout.PlacedBlock
 
 	isRow := e.Style == nil || e.Style.FlexDirection == "" || e.Style.FlexDirection == "row" || e.Style.FlexDirection == "row-reverse"
+	children := orderedFlexChildren(e.Children)
 
 	justify := ""
 	if e.Style != nil {
@@ -975,7 +1088,7 @@ func (e *FlexContainerElement) PlanLayout(area layout.LayoutArea) layout.LayoutP
 		if e.Style != nil && e.Style.Gap > 0 {
 			gap = e.Style.Gap
 		}
-		n := len(e.Children)
+		n := len(children)
 		totalGap := gap * math.Max(0, float64(n-1))
 		availableWidth := innerWidth - totalGap
 		if availableWidth < 0 {
@@ -985,7 +1098,7 @@ func (e *FlexContainerElement) PlanLayout(area layout.LayoutArea) layout.LayoutP
 		widths := make([]float64, n)
 		basisTotal := 0.0
 		totalGrow := 0.0
-		for i, child := range e.Children {
+		for i, child := range children {
 			grow := 0.0
 			if child.Style != nil && child.Style.FlexGrow > 0 {
 				grow = child.Style.FlexGrow
@@ -1015,7 +1128,7 @@ func (e *FlexContainerElement) PlanLayout(area layout.LayoutArea) layout.LayoutP
 			remainingWidth = 0
 		}
 		if totalGrow > 0 {
-			for i, child := range e.Children {
+			for i, child := range children {
 				grow := 0.0
 				if child.Style != nil && child.Style.FlexGrow > 0 {
 					grow = child.Style.FlexGrow
@@ -1032,13 +1145,23 @@ func (e *FlexContainerElement) PlanLayout(area layout.LayoutArea) layout.LayoutP
 			blocks   []layout.PlacedBlock
 			width    float64
 			consumed float64
+			overflow layout.Element
+			status   layout.LayoutStatus
+			style    *ComputedStyle
 		}
 		layouts := make([]childLayout, n)
 		maxH := 0.0
 		usedWidth := 0.0
-		for i, child := range e.Children {
-			plan := child.Element.PlanLayout(layout.LayoutArea{Width: widths[i], Height: 5000})
-			layouts[i] = childLayout{blocks: plan.Blocks, width: widths[i], consumed: plan.Consumed}
+		for i, child := range children {
+			plan := child.Element.PlanLayout(layout.LayoutArea{Width: widths[i], Height: innerHeight})
+			layouts[i] = childLayout{
+				blocks:   plan.Blocks,
+				width:    widths[i],
+				consumed: plan.Consumed,
+				overflow: plan.Overflow,
+				status:   plan.Status,
+				style:    child.Style,
+			}
 			usedWidth += widths[i]
 			if plan.Consumed > maxH {
 				maxH = plan.Consumed
@@ -1090,30 +1213,125 @@ func (e *FlexContainerElement) PlanLayout(area layout.LayoutArea) layout.LayoutP
 			}
 		}
 		consumed += maxH
+
+		var overflowChildren []FlexChildElement
+		for i, cl := range layouts {
+			switch cl.status {
+			case layout.LayoutPartial:
+				if cl.overflow != nil {
+					overflowChildren = append(overflowChildren, FlexChildElement{
+						Element: cl.overflow,
+						Style:   cl.style,
+					})
+				}
+			case layout.LayoutNothing:
+				overflowChildren = append(overflowChildren, children[i])
+			}
+		}
+		if len(overflowChildren) > 0 {
+			if consumed > area.Height {
+				consumed = area.Height
+			}
+			if consumed < 0 {
+				consumed = 0
+			}
+			if bm.Background != nil || bm.BorderTopWidth > 0 || bm.BorderBottomWidth > 0 || bm.BorderLeftWidth > 0 || bm.BorderRightWidth > 0 {
+				capturedBm := bm
+				capturedW := area.Width
+				capturedH := consumed
+				bgBlock := layout.PlacedBlock{
+					X: 0, Y: 0, Width: capturedW, Height: capturedH,
+					Draw: func(ctx *layout.DrawContext, x, topY float64) {
+						drawBoxModel(ctx, x, topY, capturedW, capturedH, capturedBm)
+					},
+				}
+				blocks = append([]layout.PlacedBlock{bgBlock}, blocks...)
+			}
+			return layout.LayoutPlan{
+				Status:   layout.LayoutPartial,
+				Consumed: consumed,
+				Blocks:   blocks,
+				Overflow: &FlexContainerElement{
+					Children: overflowChildren,
+					Style:    e.Style,
+					BoxModel: bm,
+				},
+			}
+		}
 	} else {
 		// Column layout
 		gap := 0.0
 		if e.Style != nil && e.Style.Gap > 0 {
 			gap = e.Style.Gap
 		}
-		for i, child := range e.Children {
-			plan := child.Element.PlanLayout(layout.LayoutArea{Width: innerWidth, Height: 5000})
-			for _, b := range plan.Blocks {
-				b.X += bm.ContentLeft()
-				b.Y += consumed
-				blocks = append(blocks, b)
-			}
-			consumed += plan.Consumed
-			if i < len(e.Children)-1 {
+		remainingHeight := innerHeight
+		for i, child := range children {
+			if i > 0 && gap > 0 {
+				if remainingHeight <= gap {
+					overflowChildren := append([]FlexChildElement(nil), children[i:]...)
+					if consumed > area.Height {
+						consumed = area.Height
+					}
+					return e.buildFlexResult(area.Width, consumed, blocks, overflowChildren)
+				}
 				consumed += gap
+				remainingHeight -= gap
+			}
+			plan := child.Element.PlanLayout(layout.LayoutArea{Width: innerWidth, Height: remainingHeight})
+			if plan.Status == layout.LayoutFull && plan.Consumed > remainingHeight {
+				if consumed == bm.ContentTop() {
+					return layout.LayoutPlan{Status: layout.LayoutNothing}
+				}
+				overflowChildren := append([]FlexChildElement(nil), children[i:]...)
+				if consumed > area.Height {
+					consumed = area.Height
+				}
+				return e.buildFlexResult(area.Width, consumed, blocks, overflowChildren)
+			}
+			switch plan.Status {
+			case layout.LayoutFull:
+				for _, b := range plan.Blocks {
+					b.X += bm.ContentLeft()
+					b.Y += consumed
+					blocks = append(blocks, b)
+				}
+				consumed += plan.Consumed
+				remainingHeight -= plan.Consumed
+			case layout.LayoutPartial:
+				for _, b := range plan.Blocks {
+					b.X += bm.ContentLeft()
+					b.Y += consumed
+					blocks = append(blocks, b)
+				}
+				consumed += plan.Consumed
+				overflowChildren := []FlexChildElement{{Element: plan.Overflow, Style: child.Style}}
+				overflowChildren = append(overflowChildren, children[i+1:]...)
+				if consumed > area.Height {
+					consumed = area.Height
+				}
+				return e.buildFlexResult(area.Width, consumed, blocks, overflowChildren)
+			case layout.LayoutNothing:
+				if consumed == bm.ContentTop() {
+					return layout.LayoutPlan{Status: layout.LayoutNothing}
+				}
+				overflowChildren := append([]FlexChildElement(nil), children[i:]...)
+				if consumed > area.Height {
+					consumed = area.Height
+				}
+				return e.buildFlexResult(area.Width, consumed, blocks, overflowChildren)
 			}
 		}
 	}
 	consumed += bm.PaddingBottom + bm.BorderBottomWidth + bm.MarginBottom
 
+	return e.buildFlexResult(area.Width, consumed, blocks, nil)
+}
+
+func (e *FlexContainerElement) buildFlexResult(width, consumed float64, blocks []layout.PlacedBlock, overflowChildren []FlexChildElement) layout.LayoutPlan {
+	bm := e.BoxModel
 	if bm.Background != nil || bm.BorderTopWidth > 0 || bm.BorderBottomWidth > 0 || bm.BorderLeftWidth > 0 || bm.BorderRightWidth > 0 {
 		capturedBm := bm
-		capturedW := area.Width
+		capturedW := width
 		capturedH := consumed
 		bgBlock := layout.PlacedBlock{
 			X: 0, Y: 0, Width: capturedW, Height: capturedH,
@@ -1122,6 +1340,25 @@ func (e *FlexContainerElement) PlanLayout(area layout.LayoutArea) layout.LayoutP
 			},
 		}
 		blocks = append([]layout.PlacedBlock{bgBlock}, blocks...)
+	}
+	blocks = wrapBlocksWithTransform(e.Style, blocks, width, consumed)
+
+	if len(overflowChildren) > 0 {
+		overflowFlex := &FlexContainerElement{
+			Children: overflowChildren,
+			Style:    e.Style,
+			BoxModel: bm,
+		}
+		overflowFlex.BoxModel.MarginTop = 0
+		overflowFlex.BoxModel.BorderTopWidth = 0
+		overflowFlex.BoxModel.PaddingTop = 0
+
+		return layout.LayoutPlan{
+			Status:   layout.LayoutPartial,
+			Consumed: consumed,
+			Blocks:   blocks,
+			Overflow: overflowFlex,
+		}
 	}
 
 	return layout.LayoutPlan{Status: layout.LayoutFull, Consumed: consumed, Blocks: blocks}
@@ -1145,30 +1382,123 @@ type GridTrack struct {
 func (e *GridContainerElement) PlanLayout(area layout.LayoutArea) layout.LayoutPlan {
 	bm := e.BoxModel
 	innerWidth := area.Width - bm.TotalHorizontal()
+	if innerWidth < 0 {
+		return layout.LayoutPlan{Status: layout.LayoutNothing}
+	}
+	innerHeight := area.Height - bm.TotalVertical()
+	if innerHeight < 0 {
+		return layout.LayoutPlan{Status: layout.LayoutNothing}
+	}
 	cols := len(e.Columns)
 	if cols == 0 {
 		cols = 1
 	}
-	colWidth := innerWidth / float64(cols)
+	gap := 0.0
+	if e.Style != nil && e.Style.Gap > 0 {
+		gap = e.Style.Gap
+	}
+	totalGap := gap * math.Max(0, float64(cols-1))
+	trackWidths := resolveGridTrackWidths(e.Columns, innerWidth-totalGap)
 	consumed := bm.ContentTop()
+	remainingHeight := innerHeight
 	var blocks []layout.PlacedBlock
 	col := 0
 	rowH := 0.0
+	xOffset := 0.0
 
-	for _, child := range e.Children {
-		plan := child.PlanLayout(layout.LayoutArea{Width: colWidth, Height: 5000})
+	for i, child := range e.Children {
+		colWidth := trackWidths[col]
+		plan := child.PlanLayout(layout.LayoutArea{Width: colWidth, Height: remainingHeight})
+		if plan.Status == layout.LayoutFull && plan.Consumed > remainingHeight {
+			overflowChildren := append([]layout.Element(nil), e.Children[i:]...)
+			if consumed == bm.ContentTop() && len(blocks) == 0 {
+				return layout.LayoutPlan{Status: layout.LayoutNothing}
+			}
+			if consumed > area.Height {
+				consumed = area.Height
+			}
+			return layout.LayoutPlan{
+				Status:   layout.LayoutPartial,
+				Consumed: consumed + bm.PaddingBottom + bm.BorderBottomWidth + bm.MarginBottom,
+				Blocks:   blocks,
+				Overflow: &GridContainerElement{
+					Children: overflowChildren,
+					Style:    e.Style,
+					BoxModel: bm,
+					Columns:  e.Columns,
+					Rows:     e.Rows,
+				},
+			}
+		}
 		for _, b := range plan.Blocks {
-			b.X += bm.ContentLeft() + float64(col)*colWidth
+			b.X += bm.ContentLeft() + xOffset
 			b.Y += consumed
 			blocks = append(blocks, b)
 		}
 		if plan.Consumed > rowH {
 			rowH = plan.Consumed
 		}
+		if plan.Status == layout.LayoutPartial || plan.Status == layout.LayoutNothing {
+			var overflowChildren []layout.Element
+			if plan.Status == layout.LayoutPartial && plan.Overflow != nil {
+				overflowChildren = append(overflowChildren, plan.Overflow)
+			} else {
+				overflowChildren = append(overflowChildren, child)
+			}
+			overflowChildren = append(overflowChildren, e.Children[i+1:]...)
+			if consumed == bm.ContentTop() && len(blocks) == 0 {
+				return layout.LayoutPlan{Status: layout.LayoutNothing}
+			}
+			consumed += rowH
+			if consumed > area.Height {
+				consumed = area.Height
+			}
+			return layout.LayoutPlan{
+				Status:   layout.LayoutPartial,
+				Consumed: consumed + bm.PaddingBottom + bm.BorderBottomWidth + bm.MarginBottom,
+				Blocks:   blocks,
+				Overflow: &GridContainerElement{
+					Children: overflowChildren,
+					Style:    e.Style,
+					BoxModel: bm,
+					Columns:  e.Columns,
+					Rows:     e.Rows,
+				},
+			}
+		}
 		col++
+		if col < cols {
+			xOffset += colWidth + gap
+		}
 		if col >= cols {
 			col = 0
+			xOffset = 0
 			consumed += rowH
+			remainingHeight -= rowH
+			if len(e.Rows) == 0 {
+				if i < len(e.Children)-1 {
+					if remainingHeight <= gap {
+						overflowChildren := append([]layout.Element(nil), e.Children[i+1:]...)
+						if consumed > area.Height {
+							consumed = area.Height
+						}
+						return layout.LayoutPlan{
+							Status:   layout.LayoutPartial,
+							Consumed: consumed + bm.PaddingBottom + bm.BorderBottomWidth + bm.MarginBottom,
+							Blocks:   blocks,
+							Overflow: &GridContainerElement{
+								Children: overflowChildren,
+								Style:    e.Style,
+								BoxModel: bm,
+								Columns:  e.Columns,
+								Rows:     e.Rows,
+							},
+						}
+					}
+				}
+				consumed += gap
+				remainingHeight -= gap
+			}
 			rowH = 0
 		}
 	}
@@ -1177,6 +1507,57 @@ func (e *GridContainerElement) PlanLayout(area layout.LayoutArea) layout.LayoutP
 	}
 	consumed += bm.PaddingBottom + bm.BorderBottomWidth + bm.MarginBottom
 	return layout.LayoutPlan{Status: layout.LayoutFull, Consumed: consumed, Blocks: blocks}
+}
+
+func resolveGridTrackWidths(columns []GridTrack, availableWidth float64) []float64 {
+	if len(columns) == 0 {
+		return []float64{availableWidth}
+	}
+	if availableWidth < 0 {
+		availableWidth = 0
+	}
+	widths := make([]float64, len(columns))
+	fixed := 0.0
+	totalFr := 0.0
+	autoCount := 0
+	for i, col := range columns {
+		switch {
+		case col.Fr > 0:
+			totalFr += col.Fr
+		case col.Auto:
+			autoCount++
+		default:
+			w := col.Size.ToPoints(availableWidth, 12)
+			widths[i] = w
+			fixed += w
+		}
+	}
+	remaining := availableWidth - fixed
+	if remaining < 0 {
+		remaining = 0
+	}
+	if totalFr > 0 {
+		for i, col := range columns {
+			if col.Fr > 0 {
+				widths[i] = remaining * (col.Fr / totalFr)
+			}
+		}
+		return widths
+	}
+	if autoCount > 0 {
+		autoWidth := remaining / float64(autoCount)
+		for i, col := range columns {
+			if col.Auto {
+				widths[i] = autoWidth
+			}
+		}
+		return widths
+	}
+	each := availableWidth / float64(len(columns))
+	for i := range widths {
+		widths[i] = each
+	}
+	return widths
 }
 
 // ---------------------------------------------------------------------------
@@ -1620,6 +2001,37 @@ func estimateIntrinsicWidth(el layout.Element) float64 {
 			}
 		}
 		return maxW + v.BoxModel.TotalHorizontal()
+	case *FlexContainerElement:
+		totalW := v.BoxModel.TotalHorizontal()
+		gap := 0.0
+		if v.Style != nil && v.Style.Gap > 0 {
+			gap = v.Style.Gap
+		}
+		isRow := v.Style == nil || v.Style.FlexDirection == "" || v.Style.FlexDirection == "row" || v.Style.FlexDirection == "row-reverse"
+		if isRow {
+			for i, child := range v.Children {
+				totalW += estimateIntrinsicWidth(child.Element)
+				if i > 0 {
+					totalW += gap
+				}
+			}
+			return totalW
+		}
+		maxW := 0.0
+		for _, child := range v.Children {
+			if w := estimateIntrinsicWidth(child.Element); w > maxW {
+				maxW = w
+			}
+		}
+		return maxW + totalW
+	case *GridContainerElement:
+		maxW := 0.0
+		for _, child := range v.Children {
+			if w := estimateIntrinsicWidth(child); w > maxW {
+				maxW = w
+			}
+		}
+		return maxW + v.BoxModel.TotalHorizontal()
 	case *ImageElement:
 		if v.Style != nil && !v.Style.Width.IsAuto() && v.Style.Width.Value > 0 {
 			return v.Style.Width.ToPoints(0, 12) + v.BoxModel.TotalHorizontal()
@@ -1883,6 +2295,170 @@ func drawStyledRun(ctx *layout.DrawContext, run layout.TextRun, defaultColor [3]
 		ctx.AddLink(x, lineTopY-fs, x+width, lineTopY, run.Link)
 	}
 	return width
+}
+
+func wrapBlocksWithTransform(style *ComputedStyle, blocks []layout.PlacedBlock, width, height float64) []layout.PlacedBlock {
+	if style == nil || strings.TrimSpace(style.Transform) == "" || len(blocks) == 0 {
+		return blocks
+	}
+	a, b, c, d, ok := parseTransformMatrix(style.Transform)
+	if !ok {
+		return blocks
+	}
+	start := layout.PlacedBlock{
+		X: 0, Y: 0, Width: width, Height: height,
+		Draw: func(ctx *layout.DrawContext, x, topY float64) {
+			cx, cy := resolveTransformOrigin(style.TransformOrigin, x, topY, width, height)
+			ctx.WriteString(fmt.Sprintf("q 1 0 0 1 %.2f %.2f cm %.6f %.6f %.6f %.6f 0 0 cm 1 0 0 1 %.2f %.2f cm\n",
+				cx, cy, a, b, c, d, -cx, -cy))
+		},
+	}
+	end := layout.PlacedBlock{
+		X: 0, Y: 0, Width: width, Height: height,
+		Draw: func(ctx *layout.DrawContext, x, topY float64) {
+			ctx.WriteString("Q\n")
+		},
+	}
+	out := make([]layout.PlacedBlock, 0, len(blocks)+2)
+	out = append(out, start)
+	out = append(out, blocks...)
+	out = append(out, end)
+	return out
+}
+
+func parseTransformMatrix(value string) (float64, float64, float64, float64, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" || value == "none" {
+		return 0, 0, 0, 0, false
+	}
+	a, b, c, d := 1.0, 0.0, 0.0, 1.0
+	for _, fn := range splitCSSValues(value) {
+		name, args, ok := splitCSSFunction(fn)
+		if !ok {
+			continue
+		}
+		switch name {
+		case "rotate":
+			deg, ok := parseAngleDegrees(args)
+			if !ok {
+				continue
+			}
+			rad := deg * math.Pi / 180
+			ra, rb, rc, rd := math.Cos(rad), math.Sin(rad), -math.Sin(rad), math.Cos(rad)
+			a, b, c, d = multiply2DMatrix(a, b, c, d, ra, rb, rc, rd)
+		case "scalex":
+			sx, ok := parseFloatToken(args)
+			if !ok {
+				continue
+			}
+			a, b, c, d = multiply2DMatrix(a, b, c, d, sx, 0, 0, 1)
+		case "scaley":
+			sy, ok := parseFloatToken(args)
+			if !ok {
+				continue
+			}
+			a, b, c, d = multiply2DMatrix(a, b, c, d, 1, 0, 0, sy)
+		case "scale":
+			parts := splitCSSValues(args)
+			if len(parts) == 0 {
+				continue
+			}
+			sx, ok := parseFloatToken(parts[0])
+			if !ok {
+				continue
+			}
+			sy := sx
+			if len(parts) > 1 {
+				if v, ok := parseFloatToken(parts[1]); ok {
+					sy = v
+				}
+			}
+			a, b, c, d = multiply2DMatrix(a, b, c, d, sx, 0, 0, sy)
+		}
+	}
+	return a, b, c, d, true
+}
+
+func splitCSSFunction(value string) (string, string, bool) {
+	value = strings.TrimSpace(value)
+	open := strings.IndexByte(value, '(')
+	close := strings.LastIndexByte(value, ')')
+	if open <= 0 || close <= open {
+		return "", "", false
+	}
+	return strings.ToLower(strings.TrimSpace(value[:open])), strings.TrimSpace(value[open+1 : close]), true
+}
+
+func parseAngleDegrees(value string) (float64, bool) {
+	value = strings.TrimSpace(strings.ToLower(value))
+	switch {
+	case strings.HasSuffix(value, "deg"):
+		v, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(value, "deg")), 64)
+		return v, err == nil
+	case strings.HasSuffix(value, "rad"):
+		v, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(value, "rad")), 64)
+		if err != nil {
+			return 0, false
+		}
+		return v * 180 / math.Pi, true
+	default:
+		v, err := strconv.ParseFloat(value, 64)
+		return v, err == nil
+	}
+}
+
+func parseFloatToken(value string) (float64, bool) {
+	v, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+	return v, err == nil
+}
+
+func multiply2DMatrix(a1, b1, c1, d1, a2, b2, c2, d2 float64) (float64, float64, float64, float64) {
+	return a1*a2 + c1*b2, b1*a2 + d1*b2, a1*c2 + c1*d2, b1*c2 + d1*d2
+}
+
+func resolveTransformOrigin(origin string, x, topY, width, height float64) (float64, float64) {
+	if strings.TrimSpace(origin) == "" {
+		origin = "center"
+	}
+	cx := x + width/2
+	cy := topY - height/2
+	parts := splitCSSValues(strings.ToLower(strings.TrimSpace(origin)))
+	if len(parts) == 0 {
+		return cx, cy
+	}
+	resolveAxis := func(token string, start, size float64, vertical bool) float64 {
+		switch token {
+		case "left", "top":
+			return start
+		case "right":
+			return start + size
+		case "bottom":
+			return start - size
+		case "center":
+			if vertical {
+				return start - size/2
+			}
+			return start + size/2
+		default:
+			l := parseLength(token)
+			if l.Unit != "" || l.Value != 0 {
+				offset := l.ToPoints(size, 12)
+				if vertical {
+					return start - offset
+				}
+				return start + offset
+			}
+			if vertical {
+				return start - size/2
+			}
+			return start + size/2
+		}
+	}
+	cx = resolveAxis(parts[0], x, width, false)
+	if len(parts) > 1 {
+		cy = resolveAxis(parts[1], topY, height, true)
+	}
+	return cx, cy
 }
 
 func drawTextRuns(ctx *layout.DrawContext, runs []layout.TextRun, x, topY, fontSize, lineHeight float64) {

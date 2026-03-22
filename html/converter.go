@@ -883,7 +883,14 @@ func (c *converter) convertList(node *Node) layout.Element {
 		runs := c.collectTextRuns(child)
 		var subChildren []layout.Element
 		for _, grandchild := range child.Children {
-			if grandchild.Tag == "ul" || grandchild.Tag == "ol" {
+			if grandchild.IsText() {
+				continue
+			}
+			grandchildStyle := grandchild.Style
+			if grandchildStyle == nil {
+				grandchildStyle = NewDefaultStyle()
+			}
+			if grandchild.Tag == "ul" || grandchild.Tag == "ol" || !isInlineDisplay(grandchildStyle.Display) || grandchild.Tag == "img" {
 				if el := c.convertNode(grandchild); el != nil {
 					subChildren = append(subChildren, el)
 				}

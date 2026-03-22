@@ -8,14 +8,13 @@ import (
 )
 
 func convertFlexContainer(node *Node, style *ComputedStyle, c *converter) layout.Element {
+	inlineChildren := collectAnonymousInlineChildren(node, c)
 	var children []FlexChildElement
-	for _, child := range node.Children {
-		if el := c.convertNode(child); el != nil {
-			children = append(children, FlexChildElement{
-				Element: el,
-				Style:   child.Style,
-			})
-		}
+	for _, child := range inlineChildren {
+		children = append(children, FlexChildElement{
+			Element: child.Element,
+			Style:   child.Style,
+		})
 	}
 	return &FlexContainerElement{
 		Children: children,
@@ -24,12 +23,108 @@ func convertFlexContainer(node *Node, style *ComputedStyle, c *converter) layout
 	}
 }
 
+type anonymousChild struct {
+	Element layout.Element
+	Style   *ComputedStyle
+}
+
+func collectAnonymousInlineChildren(node *Node, c *converter) []anonymousChild {
+	var children []anonymousChild
+	var currentRuns []layout.TextRun
+
+	flushRuns := func() {
+		if len(currentRuns) == 0 {
+			return
+		}
+		children = append(children, anonymousChild{
+			Element: &ParagraphElement{
+				Runs:  currentRuns,
+				Style: node.Style,
+			},
+			Style: node.Style,
+		})
+		currentRuns = nil
+	}
+
+	for _, child := range node.Children {
+		if child.IsText() {
+			text := child.Text
+			if strings.TrimSpace(text) == "" {
+				if len(currentRuns) > 0 && strings.ContainsAny(text, " \t\n\r") {
+					currentRuns = append(currentRuns, layout.TextRun{
+						Text:     " ",
+						FontName: node.Style.FontFamily,
+						FontSize: node.Style.FontSize,
+						Color:    node.Style.Color,
+					})
+				}
+				continue
+			}
+			currentRuns = append(currentRuns, c.textRunsFromText(child)...)
+			continue
+		}
+
+		childStyle := child.Style
+		if childStyle == nil {
+			childStyle = NewDefaultStyle()
+		}
+
+		if child.Tag == "img" {
+			flushRuns()
+			if el := c.convertNode(child); el != nil {
+				children = append(children, anonymousChild{Element: el, Style: child.Style})
+			}
+			continue
+		}
+
+		if childStyle.Display == "inline-block" && shouldRenderInlineBlockAsElement(child, childStyle) {
+			flushRuns()
+			if el := c.convertInlineBox(child, node.Style); el != nil {
+				children = append(children, anonymousChild{Element: el, Style: child.Style})
+			}
+			continue
+		}
+
+		if isInlineTag(child.Tag) || isInlineDisplay(childStyle.Display) {
+			if childStyle.MarginLeft.Value > 0 || childStyle.MarginLeft.Unit != "" {
+				ml := childStyle.MarginLeft.ToPoints(childStyle.FontSize, c.rootFontSize)
+				if ml > 0 {
+					spaceWidth := childStyle.FontSize * 0.25
+					if spaceWidth > 0 {
+						numSpaces := int(ml/spaceWidth + 0.5)
+						if numSpaces < 1 {
+							numSpaces = 1
+						}
+						currentRuns = append(currentRuns, layout.TextRun{
+							Text:     strings.Repeat(" ", numSpaces),
+							FontName: childStyle.FontFamily,
+							FontSize: childStyle.FontSize,
+							Color:    childStyle.Color,
+						})
+					}
+				}
+			}
+			currentRuns = append(currentRuns, c.collectTextRuns(child)...)
+			continue
+		}
+
+		flushRuns()
+		if el := c.convertNode(child); el != nil {
+			children = append(children, anonymousChild{
+				Element: el,
+				Style:   child.Style,
+			})
+		}
+	}
+
+	flushRuns()
+	return children
+}
+
 func convertGridContainer(node *Node, style *ComputedStyle, c *converter) layout.Element {
 	var children []layout.Element
-	for _, child := range node.Children {
-		if el := c.convertNode(child); el != nil {
-			children = append(children, el)
-		}
+	for _, child := range collectAnonymousInlineChildren(node, c) {
+		children = append(children, child.Element)
 	}
 	columns := parseGridTemplate(style.GridTemplateColumns)
 	rows := parseGridTemplate(style.GridTemplateRows)

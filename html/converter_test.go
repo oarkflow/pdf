@@ -203,6 +203,21 @@ func TestConvert_StyleTagAppliesBackgroundLonghands(t *testing.T) {
 	}
 }
 
+func TestConvert_EscapedClassSelectorAppliesAspectRatio(t *testing.T) {
+	html := `<!DOCTYPE html><html><head><style>.aspect-9\/10 { aspect-ratio: 9 / 10; }</style></head><body><div class="aspect-9/10"></div></body></html>`
+	result, err := Convert(html, Options{})
+	if err != nil {
+		t.Fatalf("Convert() error = %v", err)
+	}
+	div, ok := result.Elements[0].(*DivElement)
+	if !ok {
+		t.Fatalf("element type = %T, want *DivElement", result.Elements[0])
+	}
+	if div.Style == nil || div.Style.AspectRatio == 0 {
+		t.Fatal("expected escaped class selector to apply aspect-ratio")
+	}
+}
+
 func TestResolveVarReferences(t *testing.T) {
 	tests := []struct {
 		value string

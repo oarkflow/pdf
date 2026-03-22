@@ -36,6 +36,7 @@ type ComputedStyle struct {
 	MaxWidth      CSSLength
 	MinHeight     CSSLength
 	MaxHeight     CSSLength
+	AspectRatio   float64
 	ObjectFit     string // contain, cover, fill, none, scale-down
 	MarginTop     CSSLength
 	MarginRight   CSSLength
@@ -77,6 +78,7 @@ type ComputedStyle struct {
 	FlexWrap       string
 	JustifyContent string
 	AlignItems     string
+	Order          int
 	FlexGrow       float64
 	FlexShrink     float64
 	FlexBasis      CSSLength
@@ -97,10 +99,12 @@ type ComputedStyle struct {
 	BorderSpacing  float64
 
 	// Visual
-	Opacity    float64
-	Overflow   string
-	Visibility string
-	ZIndex     int
+	Opacity         float64
+	Overflow        string
+	Visibility      string
+	ZIndex          int
+	Transform       string
+	TransformOrigin string
 
 	// Page
 	PageBreakBefore string
@@ -194,6 +198,7 @@ func NewDefaultStyle() *ComputedStyle {
 		Opacity:           1,
 		Overflow:          "visible",
 		Visibility:        "visible",
+		TransformOrigin:   "center",
 		PageBreakBefore:   "auto",
 		PageBreakAfter:    "auto",
 		PageBreakInside:   "auto",
@@ -312,6 +317,8 @@ func (s *ComputedStyle) Apply(properties map[string]CSSValue, parentStyle *Compu
 			s.MinHeight = parseLength(value)
 		case "max-height":
 			s.MaxHeight = parseLength(value)
+		case "aspect-ratio":
+			s.AspectRatio = parseAspectRatio(value)
 		case "object-fit":
 			s.ObjectFit = value
 		case "margin-top":
@@ -404,6 +411,10 @@ func (s *ComputedStyle) Apply(properties map[string]CSSValue, parentStyle *Compu
 			s.JustifyContent = value
 		case "align-items":
 			s.AlignItems = value
+		case "order":
+			if v, err := strconv.Atoi(strings.TrimSpace(value)); err == nil {
+				s.Order = v
+			}
 		case "flex-grow":
 			if v, err := strconv.ParseFloat(value, 64); err == nil {
 				s.FlexGrow = v
@@ -444,6 +455,10 @@ func (s *ComputedStyle) Apply(properties map[string]CSSValue, parentStyle *Compu
 			if v, err := strconv.Atoi(value); err == nil {
 				s.ZIndex = v
 			}
+		case "transform":
+			s.Transform = value
+		case "transform-origin":
+			s.TransformOrigin = value
 		case "page-break-before":
 			s.PageBreakBefore = value
 		case "page-break-after":
@@ -458,6 +473,30 @@ func (s *ComputedStyle) Apply(properties map[string]CSSValue, parentStyle *Compu
 			s.Content = value
 		}
 	}
+}
+
+func parseAspectRatio(value string) float64 {
+	value = strings.TrimSpace(value)
+	if value == "" || value == "auto" {
+		return 0
+	}
+	if strings.Contains(value, "/") {
+		parts := strings.SplitN(value, "/", 2)
+		if len(parts) != 2 {
+			return 0
+		}
+		left, err1 := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+		right, err2 := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+		if err1 != nil || err2 != nil || left <= 0 || right <= 0 {
+			return 0
+		}
+		return left / right
+	}
+	ratio, err := strconv.ParseFloat(value, 64)
+	if err != nil || ratio <= 0 {
+		return 0
+	}
+	return ratio
 }
 
 func (s *ComputedStyle) resolveVar(value string) string {
@@ -678,7 +717,10 @@ func parseBorderWidth(s string, parentFontSize, rootFontSize float64) float64 {
 
 // parseColor parses a CSS color value to RGB [0-1].
 func parseColor(s string) ([3]float64, bool) {
-	rgb, _, ok := parseColorWithAlpha(s)
+	rgb, alpha, ok := parseColorWithAlpha(s)
+	if !ok || alpha <= 0 {
+		return [3]float64{}, false
+	}
 	return rgb, ok
 }
 

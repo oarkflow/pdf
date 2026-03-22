@@ -81,19 +81,11 @@ func ParseSelector(s string) ([]Selector, error) {
 		switch {
 		case ch == '#':
 			i++
-			start := i
-			for i < len(s) && isIdentCharByte(s[i]) {
-				i++
-			}
-			current.ID = s[start:i]
+			current.ID = readSelectorIdent(s, &i)
 
 		case ch == '.':
 			i++
-			start := i
-			for i < len(s) && isIdentCharByte(s[i]) {
-				i++
-			}
-			current.Classes = append(current.Classes, s[start:i])
+			current.Classes = append(current.Classes, readSelectorIdent(s, &i))
 
 		case ch == '[':
 			i++
@@ -155,11 +147,7 @@ func ParseSelector(s string) ([]Selector, error) {
 
 		default:
 			if isIdentCharByte(ch) {
-				start := i
-				for i < len(s) && isIdentCharByte(s[i]) {
-					i++
-				}
-				current.Type = s[start:i]
+				current.Type = readSelectorIdent(s, &i)
 			} else {
 				i++
 			}
@@ -171,6 +159,31 @@ func ParseSelector(s string) ([]Selector, error) {
 
 func isIdentCharByte(b byte) bool {
 	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '_' || b == '-'
+}
+
+func readSelectorIdent(s string, i *int) string {
+	start := *i
+	var b strings.Builder
+	for *i < len(s) {
+		switch {
+		case isIdentCharByte(s[*i]):
+			b.WriteByte(s[*i])
+			*i++
+		case s[*i] == '\\' && *i+1 < len(s):
+			*i++
+			b.WriteByte(s[*i])
+			*i++
+		default:
+			if b.Len() == 0 {
+				return s[start:*i]
+			}
+			return b.String()
+		}
+	}
+	if b.Len() == 0 {
+		return s[start:*i]
+	}
+	return b.String()
 }
 
 func parseAttrSelector(s string, i *int) *AttrSelector {
@@ -418,7 +431,7 @@ func matchPseudoClass(pseudo string, node *Node) bool {
 		return node.Tag == "a" && node.GetAttribute("href") != ""
 	case pseudo == "hover", pseudo == "active", pseudo == "focus":
 		return false // Not applicable in print
-	case pseudo == "not(" + pseudo[4:]:
+	case strings.HasPrefix(pseudo, "not("):
 		// Simple :not() support
 		inner := pseudo[4:]
 		if idx := strings.IndexByte(inner, ')'); idx >= 0 {
@@ -429,8 +442,27 @@ func matchPseudoClass(pseudo string, node *Node) bool {
 			return true
 		}
 		return !innerSels[0].Matches(node)
+	case strings.HasPrefix(pseudo, "is("), strings.HasPrefix(pseudo, "where("):
+		open := strings.IndexByte(pseudo, '(')
+		if open < 0 {
+			return false
+		}
+		inner := pseudo[open+1:]
+		if idx := strings.LastIndexByte(inner, ')'); idx >= 0 {
+			inner = inner[:idx]
+		}
+		innerSels, err := ParseSelectorList(inner)
+		if err != nil || len(innerSels) == 0 {
+			return false
+		}
+		for i := range innerSels {
+			if innerSels[i].Matches(node) {
+				return true
+			}
+		}
+		return false
 	}
-	return true // Unknown pseudo-classes pass
+	return false
 }
 
 func matchNth(expr string, index int) bool {

@@ -468,6 +468,11 @@ func (p *Parser) parseLayout(class string) map[string]any {
 	if v, ok := aspectRatios[class]; ok {
 		return map[string]any{"aspect-ratio": v}
 	}
+	if rest, ok := stripPrefix(class, "aspect-"); ok {
+		if num, den, ok := parseFraction(rest); ok && den != "0" {
+			return map[string]any{"aspect-ratio": fmt.Sprintf("%s / %s", num, den)}
+		}
+	}
 	if strings.HasPrefix(class, "aspect-[") {
 		val := extractArbitrary(class, "aspect-")
 		return map[string]any{"aspect-ratio": val}
@@ -2930,6 +2935,25 @@ func negate(val string) string {
 		return val[1:]
 	}
 	return "-" + val
+}
+
+func parseFraction(s string) (string, string, bool) {
+	parts := strings.Split(s, "/")
+	if len(parts) != 2 {
+		return "", "", false
+	}
+	num := strings.TrimSpace(parts[0])
+	den := strings.TrimSpace(parts[1])
+	if num == "" || den == "" {
+		return "", "", false
+	}
+	if _, err := strconv.ParseFloat(num, 64); err != nil {
+		return "", "", false
+	}
+	if _, err := strconv.ParseFloat(den, 64); err != nil {
+		return "", "", false
+	}
+	return num, den, true
 }
 
 func applyOpacity(color, opacity string) string {
