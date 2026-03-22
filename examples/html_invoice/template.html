@@ -232,7 +232,7 @@
     <div class="brand-wrap">
       {{ raw logo_html}}
       <div class="brand">{{from_name}}</div>
-      <div class="brand-sub">{{from_email}} &bull; {{from_phone}} &bull; {{from_website}}</div>
+      <div class="brand-sub"><a href="{{from_email_href}}">{{from_email}}</a> &bull; <a href="{{from_phone_href}}">{{from_phone}}</a> &bull; <a href="{{from_website_href}}">{{from_website}}</a></div>
     </div>
     <div class="invoice-title">
       <div class="invoice-label">INVOICE</div>
@@ -265,8 +265,8 @@
         {{from_address}}<br>
         {{from_city}}, {{from_state}} {{from_zip}}<br>
         {{from_country}}<br>
-        {{from_phone}}<br>
-        {{from_email}}
+        <a href="{{from_phone_href}}">{{from_phone}}</a><br>
+        <a href="{{from_email_href}}">{{from_email}}</a>
         {{ raw from_tax_id_line}}
       </div>
     </div>
@@ -277,8 +277,8 @@
         {{to_address}}<br>
         {{to_city}}, {{to_state}} {{to_zip}}<br>
         {{to_country}}<br>
-        {{to_phone}}<br>
-        {{to_email}}
+        <a href="{{to_phone_href}}">{{to_phone}}</a><br>
+        <a href="{{to_email_href}}">{{to_email}}</a>
       </div>
     </div>
   </div>
@@ -331,7 +331,7 @@
 
   <!-- ===== BOTTOM BAR ===== -->
   <div class="bottom-bar">
-    {{from_name}} &bull; {{from_full_address}} &bull; {{from_email}} &bull; Tax ID: {{from_tax_id}}
+    {{from_name}} &bull; {{from_full_address}} &bull; <a href="{{from_email_href}}">{{from_email}}</a> &bull; Tax ID: {{from_tax_id}}
   </div>
 
 </body>

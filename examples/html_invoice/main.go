@@ -103,39 +103,44 @@ func main() {
 	}
 
 	// Build the data map for {{placeholder}} resolution
-	data := map[string]string{
-		"invoice_number":     d.Number,
-		"from_name":          d.From.Name,
-		"from_email":         d.From.Email,
-		"from_phone":         d.From.Phone,
-		"from_website":       d.From.Website,
-		"from_address":       d.From.Address,
-		"from_city":          d.From.City,
-		"from_state":         d.From.State,
-		"from_zip":           d.From.Zip,
-		"from_country":       d.From.Country,
-		"from_tax_id":        d.From.TaxID,
-		"from_tax_id_line":   taxIDLine,
-		"from_full_address":  d.From.Address + ", " + d.From.City + ", " + d.From.State + " " + d.From.Zip,
-		"to_name":            d.To.Name,
-		"to_address":         d.To.Address,
-		"to_city":            d.To.City,
-		"to_state":           d.To.State,
-		"to_zip":             d.To.Zip,
-		"to_country":         d.To.Country,
-		"to_phone":           d.To.Phone,
-		"to_email":           d.To.Email,
-		"date":               d.Date,
-		"due_date":           d.DueDate,
-		"currency":           d.Currency,
-		"logo_html":          logoHTML,
-		"item_rows":          itemRows,
-		"subtotal":           fmtMoney(subtotal),
-		"tax_rate":           fmt.Sprintf("%.1f", d.TaxRate),
-		"tax":                fmtMoney(tax),
-		"total":              fmtMoney(total),
-		"notes":              d.Notes,
-		"payment_info":       d.PaymentInfo,
+	data := map[string]any{
+		"invoice_number":    d.Number,
+		"from_name":         d.From.Name,
+		"from_email":        d.From.Email,
+		"from_email_href":   "mailto:" + d.From.Email,
+		"from_phone":        d.From.Phone,
+		"from_phone_href":   phoneHref(d.From.Phone),
+		"from_website":      d.From.Website,
+		"from_website_href": websiteHref(d.From.Website),
+		"from_address":      d.From.Address,
+		"from_city":         d.From.City,
+		"from_state":        d.From.State,
+		"from_zip":          d.From.Zip,
+		"from_country":      d.From.Country,
+		"from_tax_id":       d.From.TaxID,
+		"from_tax_id_line":  taxIDLine,
+		"from_full_address": d.From.Address + ", " + d.From.City + ", " + d.From.State + " " + d.From.Zip,
+		"to_name":           d.To.Name,
+		"to_address":        d.To.Address,
+		"to_city":           d.To.City,
+		"to_state":          d.To.State,
+		"to_zip":            d.To.Zip,
+		"to_country":        d.To.Country,
+		"to_phone":          d.To.Phone,
+		"to_phone_href":     phoneHref(d.To.Phone),
+		"to_email":          d.To.Email,
+		"to_email_href":     "mailto:" + d.To.Email,
+		"date":              d.Date,
+		"due_date":          d.DueDate,
+		"currency":          d.Currency,
+		"logo_html":         logoHTML,
+		"item_rows":         itemRows,
+		"subtotal":          fmtMoney(subtotal),
+		"tax_rate":          fmt.Sprintf("%.1f", d.TaxRate),
+		"tax":               fmtMoney(tax),
+		"total":             fmtMoney(total),
+		"notes":             d.Notes,
+		"payment_info":      d.PaymentInfo,
 	}
 
 	// Load the HTML template from file
@@ -148,8 +153,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Resolve {{placeholders}} in the HTML template
-	invoiceHTML := template.ReplaceMap(string(templateBytes), data)
+	// Resolve {{placeholders}} in the HTML template using fasttpl
+	invoiceHTML, err := template.RenderHTML(string(templateBytes), data)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error rendering template: %v\n", err)
+		os.Exit(1)
+	}
 
 	err = pdf.FromHTML(invoiceHTML, "invoice.pdf", html.Options{
 		DefaultFontSize:   10,
@@ -245,4 +254,27 @@ func fmtMoney(v float64) string {
 		result = append(result, byte(c))
 	}
 	return "$" + string(result) + "." + decPart
+}
+
+func phoneHref(phone string) string {
+	var b strings.Builder
+	for _, r := range phone {
+		if (r >= '0' && r <= '9') || r == '+' {
+			b.WriteRune(r)
+		}
+	}
+	if b.Len() == 0 {
+		return ""
+	}
+	return "tel:" + b.String()
+}
+
+func websiteHref(site string) string {
+	if site == "" {
+		return ""
+	}
+	if strings.HasPrefix(site, "http://") || strings.HasPrefix(site, "https://") {
+		return site
+	}
+	return "https://" + site
 }

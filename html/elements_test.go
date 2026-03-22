@@ -8,6 +8,14 @@ import (
 	"github.com/oarkflow/pdf/svg"
 )
 
+type testElement struct {
+	plan layout.LayoutPlan
+}
+
+func (e testElement) PlanLayout(area layout.LayoutArea) layout.LayoutPlan {
+	return e.plan
+}
+
 func TestParseSVGDimensions_ViewBoxCommaSeparated(t *testing.T) {
 	root := &svg.SVGNode{
 		Attrs: map[string]string{
@@ -41,5 +49,129 @@ func TestPlanSVGLayout_AppliesObjectFitOffsetInPlacementMatrix(t *testing.T) {
 
 	if !strings.Contains(stream, "2.6667 0 0 -2.6667 10.0000 160.0000 cm") {
 		t.Fatalf("expected placement matrix with contain offset, got:\n%s", stream)
+	}
+}
+
+func TestWrapRunsPreservesExplicitMultiSpaceGaps(t *testing.T) {
+	runs := []layout.TextRun{
+		{Text: "Website", FontName: "Helvetica", FontSize: 10},
+		{Text: "    ", FontName: "Helvetica", FontSize: 10},
+		{Text: "Contact", FontName: "Helvetica", FontSize: 10},
+	}
+
+	lines := wrapRuns(runs, 500, 10)
+	if len(lines) != 1 {
+		t.Fatalf("lines = %d, want 1", len(lines))
+	}
+	var got strings.Builder
+	for _, run := range lines[0].runs {
+		got.WriteString(run.Text)
+	}
+	if got.String() != "Website    Contact" {
+		t.Fatalf("wrapped text = %q", got.String())
+	}
+}
+
+func TestParagraphDrawAddsLinkAnnotation(t *testing.T) {
+	el := &ParagraphElement{
+		Runs: []layout.TextRun{{
+			Text:     "Contact us",
+			FontName: "Helvetica",
+			FontSize: 12,
+			Color:    [3]float64{0, 0, 1},
+			Link:     "mailto:billing@example.com",
+		}},
+		Style: &ComputedStyle{
+			FontSize:   12,
+			LineHeight: 1.2,
+			Color:      [3]float64{0, 0, 0},
+		},
+	}
+
+	plan := el.PlanLayout(layout.LayoutArea{Width: 200, Height: 200})
+	if len(plan.Blocks) != 1 {
+		t.Fatalf("blocks = %d, want 1", len(plan.Blocks))
+	}
+
+	ctx := layout.NewDrawContext(300, 300)
+	plan.Blocks[0].Draw(ctx, 20, 260)
+
+	if len(ctx.Links) != 1 {
+		t.Fatalf("links = %d, want 1", len(ctx.Links))
+	}
+	if got := ctx.Links[0].URI; got != "mailto:billing@example.com" {
+		t.Fatalf("link uri = %q", got)
+	}
+}
+
+func TestDivElementPaginatesOverflow(t *testing.T) {
+	el := &DivElement{
+		Children: []layout.Element{
+			testElement{
+				plan: layout.LayoutPlan{
+					Status:   layout.LayoutPartial,
+					Consumed: 36,
+					Blocks:   []layout.PlacedBlock{{Width: 100, Height: 36}},
+					Overflow: testElement{plan: layout.LayoutPlan{Status: layout.LayoutFull, Consumed: 20}},
+				},
+			},
+		},
+	}
+
+	plan := el.PlanLayout(layout.LayoutArea{Width: 180, Height: 48})
+	if plan.Status != layout.LayoutPartial {
+		t.Fatalf("status = %v, want partial", plan.Status)
+	}
+	if plan.Overflow == nil {
+		t.Fatal("expected overflow element")
+	}
+	if plan.Consumed > 48 {
+		t.Fatalf("consumed = %.2f, exceeds page height", plan.Consumed)
+	}
+}
+
+func TestToWinAnsiEmitsSingleByteCopyright(t *testing.T) {
+	got := []byte(toWinAnsi("©"))
+	if len(got) != 1 {
+		t.Fatalf("len = %d, want 1", len(got))
+	}
+	if got[0] != 0xA9 {
+		t.Fatalf("byte = 0x%X, want 0xA9", got[0])
+	}
+}
+
+func TestConvertTreatsStyledInlineBlockAsInlineBox(t *testing.T) {
+	htmlInput := `<!DOCTYPE html><html><body><div class="text-center"><button class="bg-blue-600 text-white px-6 py-2 rounded-lg">Subscribe Now</button></div></body></html>`
+	result, err := Convert(htmlInput, Options{UseTailwind: true, DefaultFontSize: 10})
+	if err != nil {
+		t.Fatalf("Convert() error = %v", err)
+	}
+	if len(result.Elements) != 1 {
+		t.Fatalf("elements = %d, want 1", len(result.Elements))
+	}
+
+	root, ok := result.Elements[0].(*DivElement)
+	if !ok {
+		t.Fatalf("root type = %T, want *DivElement", result.Elements[0])
+	}
+	if len(root.Children) != 1 {
+		t.Fatalf("root children = %d, want 1", len(root.Children))
+	}
+
+	btn, ok := root.Children[0].(*InlineBoxElement)
+	if !ok {
+		t.Fatalf("child type = %T, want *InlineBoxElement", root.Children[0])
+	}
+	if btn.BoxModel.Background == nil {
+		t.Fatal("expected button background")
+	}
+	if btn.BoxModel.PaddingLeft <= 0 || btn.BoxModel.PaddingRight <= 0 {
+		t.Fatalf("expected horizontal padding, got left=%.2f right=%.2f", btn.BoxModel.PaddingLeft, btn.BoxModel.PaddingRight)
+	}
+	if btn.BoxModel.BorderRadius <= 0 {
+		t.Fatalf("expected border radius, got %.2f", btn.BoxModel.BorderRadius)
+	}
+	if btn.OuterAlign != "center" {
+		t.Fatalf("outer align = %q, want center", btn.OuterAlign)
 	}
 }

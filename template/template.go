@@ -262,30 +262,6 @@ func resolvePlaceholders(el layout.Element, data interface{}) (layout.Element, e
 	return el, nil
 }
 
-// ReplaceMap renders all {{ ... }} expressions in s using fasttpl with the
-// provided map data. Supports conditions, ranges, filters, nested keys, etc.
-func ReplaceMap(s string, data map[string]string) string {
-	m := make(map[string]any, len(data))
-	for k, v := range data {
-		m[k] = v
-	}
-	result, err := renderWithFasttpl(s, m)
-	if err != nil {
-		return s // return original on error for backward compat
-	}
-	return result
-}
-
-// ReplaceMapAny renders all {{ ... }} expressions in s using fasttpl with the
-// provided map data. Supports conditions, ranges, filters, nested keys, etc.
-func ReplaceMapAny(s string, data map[string]any) string {
-	result, err := renderWithFasttpl(s, data)
-	if err != nil {
-		return s
-	}
-	return result
-}
-
 // FromString processes a fasttpl template string with data and returns the result.
 // Supports {{ if }}, {{ range }}, filters, nested keys, etc.
 func FromString(tmpl string, data interface{}) (string, error) {

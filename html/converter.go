@@ -254,12 +254,12 @@ func Convert(htmlString string, opts Options) (*ConvertResult, error) {
 }
 
 type converter struct {
-	opts            Options
-	rootFontSize    float64
-	stylesheet      *Stylesheet
-	fetcher         *Fetcher
-	counters        *CounterState
-	tailwindParser  *tailwind.Parser
+	opts           Options
+	rootFontSize   float64
+	stylesheet     *Stylesheet
+	fetcher        *Fetcher
+	counters       *CounterState
+	tailwindParser *tailwind.Parser
 }
 
 // appliedRule pairs a rule with its order for cascade sorting.
@@ -281,88 +281,6 @@ func (c *converter) applyStyles(node *Node, parentStyle *ComputedStyle) {
 
 	// Apply tag-based default display
 	applyTagDefaults(node, style)
-
-	// Apply Tailwind classes (before CSS rules, so document CSS can override)
-	if c.tailwindParser != nil && len(node.Classes) > 0 {
-		classes := strings.Join(node.Classes, " ")
-		twProps := c.tailwindParser.Parse(classes)
-		if len(twProps) > 0 {
-			// For PDF, apply responsive variants up to the page width.
-			// A4 is ~795px, so sm (640), md (768) apply; lg (1024) does not.
-			pageWidthPx := c.opts.PageSize[0] * 96 / 72 // points to px
-			activeVariants := []string{":variant:sm", ":variant:md"}
-			if pageWidthPx >= 1024 {
-				activeVariants = append(activeVariants, ":variant:lg")
-			}
-			if pageWidthPx >= 1280 {
-				activeVariants = append(activeVariants, ":variant:xl")
-			}
-			// Merge active variant props into base props
-			for _, vk := range activeVariants {
-				if vprops, ok := twProps[vk]; ok {
-					for k, v := range vprops.(map[string]any) {
-						twProps[k] = v
-					}
-				}
-			}
-
-			cssProps := make(map[string]CSSValue)
-			// Collect CSS custom properties first for var() resolution
-			customProps := make(map[string]string)
-			for k, v := range twProps {
-				if strings.HasPrefix(k, "--") {
-					customProps[k] = fmt.Sprintf("%v", v)
-				}
-			}
-			for k, v := range twProps {
-				// Skip variant-prefixed and CSS custom properties
-				if strings.HasPrefix(k, ":variant:") || strings.HasPrefix(k, "--") {
-					continue
-				}
-				vs := fmt.Sprintf("%v", v)
-				// Resolve var() references using custom properties
-				if strings.Contains(vs, "var(") {
-					vs = resolveVarReferences(vs, customProps)
-					// If still has unresolvable var(), skip
-					if strings.Contains(vs, "var(") {
-						continue
-					}
-				}
-				// Resolve calc() expressions with simple arithmetic
-				if strings.Contains(vs, "calc(") {
-					vs = resolveCalcExpressions(vs)
-				}
-				val := CSSValue{Value: vs}
-				// Expand shorthand properties
-				switch k {
-				case "padding":
-					expandBoxShorthand("padding", val, cssProps)
-				case "margin":
-					expandBoxShorthand("margin", val, cssProps)
-				case "border-width":
-					expandBoxShorthand("border", val, cssProps)
-					// Rename to border-*-width
-					for _, side := range []string{"top", "right", "bottom", "left"} {
-						if sv, ok := cssProps["border-"+side]; ok {
-							cssProps["border-"+side+"-width"] = sv
-							delete(cssProps, "border-"+side)
-						}
-					}
-				case "border-color":
-					for _, side := range []string{"top", "right", "bottom", "left"} {
-						cssProps["border-"+side+"-color"] = val
-					}
-				case "border-style":
-					for _, side := range []string{"top", "right", "bottom", "left"} {
-						cssProps["border-"+side+"-style"] = val
-					}
-				default:
-					cssProps[k] = val
-				}
-			}
-			style.Apply(cssProps, parentStyle, c.rootFontSize)
-		}
-	}
 
 	// Collect matching rules
 	var rules []appliedRule
@@ -411,6 +329,121 @@ func (c *converter) applyStyles(node *Node, parentStyle *ComputedStyle) {
 		}
 	}
 
+	// Apply Tailwind classes (after CSS rules, so they override user-agent styles)
+	var spaceXValue, spaceYValue string // child-affecting space utilities
+	if c.tailwindParser != nil && len(node.Classes) > 0 {
+		classes := strings.Join(node.Classes, " ")
+		twProps := c.tailwindParser.Parse(classes)
+		if len(twProps) > 0 {
+			// Detect space-x-* / space-y-* classes — these affect children, not self.
+			for _, cls := range node.Classes {
+				if strings.HasPrefix(cls, "space-x-") || strings.HasPrefix(cls, "space-y-") {
+					spProps := c.tailwindParser.Parse(cls)
+					customP := make(map[string]string)
+					for k, v := range spProps {
+						if strings.HasPrefix(k, "--") {
+							customP[k] = fmt.Sprintf("%v", v)
+						}
+					}
+					if strings.HasPrefix(cls, "space-x-") {
+						if ml, ok := spProps["margin-left"]; ok {
+							vs := fmt.Sprintf("%v", ml)
+							if strings.Contains(vs, "var(") {
+								vs = resolveVarReferences(vs, customP)
+							}
+							if strings.Contains(vs, "calc(") {
+								vs = resolveCalcExpressions(vs)
+							}
+							spaceXValue = vs
+						}
+						delete(twProps, "margin-left")
+						delete(twProps, "margin-right")
+						delete(twProps, "--tw-space-x-reverse")
+					} else {
+						if mt, ok := spProps["margin-top"]; ok {
+							vs := fmt.Sprintf("%v", mt)
+							if strings.Contains(vs, "var(") {
+								vs = resolveVarReferences(vs, customP)
+							}
+							if strings.Contains(vs, "calc(") {
+								vs = resolveCalcExpressions(vs)
+							}
+							spaceYValue = vs
+						}
+						delete(twProps, "margin-top")
+						delete(twProps, "margin-bottom")
+						delete(twProps, "--tw-space-y-reverse")
+					}
+				}
+			}
+
+			pageWidthPx := c.opts.PageSize[0] * 96 / 72
+			activeVariants := []string{":variant:sm", ":variant:md"}
+			if pageWidthPx >= 1024 {
+				activeVariants = append(activeVariants, ":variant:lg")
+			}
+			if pageWidthPx >= 1280 {
+				activeVariants = append(activeVariants, ":variant:xl")
+			}
+			for _, vk := range activeVariants {
+				if vprops, ok := twProps[vk]; ok {
+					for k, v := range vprops.(map[string]any) {
+						twProps[k] = v
+					}
+				}
+			}
+
+			cssProps := make(map[string]CSSValue)
+			customProps := make(map[string]string)
+			for k, v := range twProps {
+				if strings.HasPrefix(k, "--") {
+					customProps[k] = fmt.Sprintf("%v", v)
+				}
+			}
+			for k, v := range twProps {
+				if strings.HasPrefix(k, ":variant:") || strings.HasPrefix(k, "--") {
+					continue
+				}
+				vs := fmt.Sprintf("%v", v)
+				if strings.Contains(vs, "var(") {
+					vs = resolveVarReferences(vs, customProps)
+					if strings.Contains(vs, "var(") {
+						continue
+					}
+				}
+				if strings.Contains(vs, "calc(") {
+					vs = resolveCalcExpressions(vs)
+				}
+				val := CSSValue{Value: vs}
+				switch k {
+				case "padding":
+					expandBoxShorthand("padding", val, cssProps)
+				case "margin":
+					expandBoxShorthand("margin", val, cssProps)
+				case "border-width":
+					expandBoxShorthand("border", val, cssProps)
+					for _, side := range []string{"top", "right", "bottom", "left"} {
+						if sv, ok := cssProps["border-"+side]; ok {
+							cssProps["border-"+side+"-width"] = sv
+							delete(cssProps, "border-"+side)
+						}
+					}
+				case "border-color":
+					for _, side := range []string{"top", "right", "bottom", "left"} {
+						cssProps["border-"+side+"-color"] = val
+					}
+				case "border-style":
+					for _, side := range []string{"top", "right", "bottom", "left"} {
+						cssProps["border-"+side+"-style"] = val
+					}
+				default:
+					cssProps[k] = val
+				}
+			}
+			style.Apply(cssProps, parentStyle, c.rootFontSize)
+		}
+	}
+
 	// Apply inline styles last (highest priority)
 	if inlineStyle := node.GetAttribute("style"); inlineStyle != "" {
 		props := ParseInlineStyle(inlineStyle)
@@ -447,9 +480,23 @@ func (c *converter) applyStyles(node *Node, parentStyle *ComputedStyle) {
 		}
 	}
 
-	// Recurse children
+	// Recurse children, applying space-x / space-y margins to non-first element children
+	// (mimics Tailwind's > * + * selector — skip text nodes for counting)
+	elementIdx := 0
 	for _, child := range node.Children {
 		c.applyStyles(child, style)
+		if child.IsText() {
+			continue
+		}
+		if elementIdx > 0 && child.Style != nil {
+			if spaceXValue != "" {
+				child.Style.Apply(map[string]CSSValue{"margin-left": {Value: spaceXValue}}, style, c.rootFontSize)
+			}
+			if spaceYValue != "" {
+				child.Style.Apply(map[string]CSSValue{"margin-top": {Value: spaceYValue}}, style, c.rootFontSize)
+			}
+		}
+		elementIdx++
 	}
 }
 
@@ -635,6 +682,15 @@ func (c *converter) convertDiv(node *Node) layout.Element {
 		if child.IsText() {
 			text := child.Text
 			if strings.TrimSpace(text) == "" {
+				// Preserve a single space between inline elements
+				if len(currentRuns) > 0 && strings.ContainsAny(text, " \t\n\r") {
+					currentRuns = append(currentRuns, layout.TextRun{
+						Text:     " ",
+						FontName: node.Style.FontFamily,
+						FontSize: node.Style.FontSize,
+						Color:    node.Style.Color,
+					})
+				}
 				continue
 			}
 			runs := c.textRunsFromText(child)
@@ -662,7 +718,42 @@ func (c *converter) convertDiv(node *Node) layout.Element {
 			continue
 		}
 
+		if childStyle.Display == "inline-block" && shouldRenderInlineBlockAsElement(child, childStyle) {
+			if len(currentRuns) > 0 {
+				children = append(children, &ParagraphElement{
+					Runs:  currentRuns,
+					Style: node.Style,
+				})
+				currentRuns = nil
+			}
+			if el := c.convertInlineBox(child, node.Style); el != nil {
+				children = append(children, el)
+			}
+			continue
+		}
+
 		if isInlineTag(child.Tag) || childStyle.Display == "inline" || childStyle.Display == "inline-block" {
+			// Convert margin-left (e.g. from space-x-*) to spacing in text runs
+			if childStyle.MarginLeft.Value > 0 || childStyle.MarginLeft.Unit != "" {
+				ml := childStyle.MarginLeft.ToPoints(childStyle.FontSize, c.rootFontSize)
+				if ml > 0 {
+					// Insert spaces proportional to margin width
+					// Average space char is ~0.25em wide in most fonts
+					spaceWidth := childStyle.FontSize * 0.25
+					if spaceWidth > 0 {
+						numSpaces := int(ml/spaceWidth + 0.5)
+						if numSpaces < 1 {
+							numSpaces = 1
+						}
+						currentRuns = append(currentRuns, layout.TextRun{
+							Text:     strings.Repeat(" ", numSpaces),
+							FontName: childStyle.FontFamily,
+							FontSize: childStyle.FontSize,
+							Color:    childStyle.Color,
+						})
+					}
+				}
+			}
 			runs := c.collectTextRuns(child)
 			currentRuns = append(currentRuns, runs...)
 			continue
@@ -698,6 +789,50 @@ func (c *converter) convertDiv(node *Node) layout.Element {
 		Children: children,
 		Style:    node.Style,
 		BoxModel: c.computeBoxModel(node.Style),
+	}
+}
+
+func shouldRenderInlineBlockAsElement(node *Node, style *ComputedStyle) bool {
+	if node.Tag == "button" {
+		return true
+	}
+	if style == nil {
+		return false
+	}
+	if style.BackgroundColor != nil || style.BorderRadius > 0 {
+		return true
+	}
+	if style.PaddingTop.Value > 0 || style.PaddingRight.Value > 0 || style.PaddingBottom.Value > 0 || style.PaddingLeft.Value > 0 {
+		return true
+	}
+	if style.BorderTopWidth > 0 || style.BorderRightWidth > 0 || style.BorderBottomWidth > 0 || style.BorderLeftWidth > 0 {
+		return true
+	}
+	return false
+}
+
+func (c *converter) convertInlineBox(node *Node, parentStyle *ComputedStyle) layout.Element {
+	runs := c.collectTextRuns(node)
+	if len(runs) == 0 {
+		return nil
+	}
+	parentAlign := "left"
+	if parentStyle != nil && parentStyle.TextAlign != "" {
+		parentAlign = parentStyle.TextAlign
+	}
+	innerAlign := ""
+	if node.Style != nil {
+		innerAlign = node.Style.TextAlign
+	}
+	if innerAlign == "" && node.Tag == "button" {
+		innerAlign = "center"
+	}
+	return &InlineBoxElement{
+		Runs:       runs,
+		Style:      node.Style,
+		BoxModel:   c.computeBoxModel(node.Style),
+		OuterAlign: parentAlign,
+		InnerAlign: innerAlign,
 	}
 }
 
@@ -1234,6 +1369,16 @@ func tryEvalCalc(expr string) string {
 				return fmt.Sprintf("%g%s", lVal+rVal, lUnit)
 			case " - ":
 				return fmt.Sprintf("%g%s", lVal-rVal, lUnit)
+			}
+		}
+		if lUnit == "" && rUnit == "" {
+			switch op {
+			case " * ":
+				return fmt.Sprintf("%g", lVal*rVal)
+			case " + ":
+				return fmt.Sprintf("%g", lVal+rVal)
+			case " - ":
+				return fmt.Sprintf("%g", lVal-rVal)
 			}
 		}
 	}

@@ -187,11 +187,12 @@ func (d *Document) WriteTo(w io.Writer) (int64, error) {
 		}
 
 		p := &Page{
-			Size:      page.Size,
-			Resources: page.Resources,
-			Contents:  content,
-			Fonts:     page.Fonts,
-			Images:    page.Images,
+			Size:        page.Size,
+			Resources:   page.Resources,
+			Contents:    content,
+			Fonts:       page.Fonts,
+			Images:      page.Images,
+			Annotations: page.Annotations,
 		}
 		if _, err := wr.AddPage(p); err != nil {
 			return 0, err
@@ -280,11 +281,12 @@ func (d *Document) WriteStreamingTo(w io.Writer) error {
 		}
 
 		p := &Page{
-			Size:      page.Size,
-			Resources: page.Resources,
-			Contents:  content,
-			Fonts:     page.Fonts,
-			Images:    page.Images,
+			Size:        page.Size,
+			Resources:   page.Resources,
+			Contents:    content,
+			Fonts:       page.Fonts,
+			Images:      page.Images,
+			Annotations: page.Annotations,
 		}
 		if _, err := sw.AddPage(p); err != nil {
 			return err

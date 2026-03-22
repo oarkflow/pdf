@@ -37,11 +37,18 @@ type PlacedBlock struct {
 	Children            []PlacedBlock
 }
 
+// LinkAnnotation represents a clickable link region on a page.
+type LinkAnnotation struct {
+	X1, Y1, X2, Y2 float64 // rectangle in PDF coordinates (bottom-left origin)
+	URI             string
+}
+
 // DrawContext provides drawing capabilities during rendering.
 type DrawContext struct {
 	ContentStream []byte
 	Fonts         map[string]FontEntry
 	Images        map[string]ImageEntry
+	Links         []LinkAnnotation
 	PageWidth     float64
 	PageHeight    float64
 }
@@ -70,6 +77,11 @@ func (ctx *DrawContext) BeginMarkedContent(tag string, mcid int) {
 // EndMarkedContent writes an EMC operator.
 func (ctx *DrawContext) EndMarkedContent() {
 	ctx.WriteString("EMC\n")
+}
+
+// AddLink records a clickable link annotation for the current page.
+func (ctx *DrawContext) AddLink(x1, y1, x2, y2 float64, uri string) {
+	ctx.Links = append(ctx.Links, LinkAnnotation{X1: x1, Y1: y1, X2: x2, Y2: y2, URI: uri})
 }
 
 // FontEntry tracks a font used on a page.

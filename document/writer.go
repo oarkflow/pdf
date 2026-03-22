@@ -138,6 +138,30 @@ func (w *Writer) AddPage(page *Page) (int, error) {
 	pageDict.Set("Contents", core.PdfIndirectReference{ObjectNumber: contentsNum})
 	pageDict.Set("Resources", res)
 
+	// Add link annotations
+	if len(page.Annotations) > 0 {
+		var annotRefs core.PdfArray
+		for _, link := range page.Annotations {
+			annotDict := core.NewDictionary()
+			annotDict.Set("Type", core.PdfName("Annot"))
+			annotDict.Set("Subtype", core.PdfName("Link"))
+			annotDict.Set("Rect", core.PdfArray{
+				core.PdfNumber(link.X1), core.PdfNumber(link.Y1),
+				core.PdfNumber(link.X2), core.PdfNumber(link.Y2),
+			})
+			annotDict.Set("Border", core.PdfArray{
+				core.PdfNumber(0), core.PdfNumber(0), core.PdfNumber(0),
+			})
+			actionDict := core.NewDictionary()
+			actionDict.Set("S", core.PdfName("URI"))
+			actionDict.Set("URI", core.PdfString(link.URI))
+			annotDict.Set("A", actionDict)
+			annotNum := w.AddObject(annotDict)
+			annotRefs = append(annotRefs, core.PdfIndirectReference{ObjectNumber: annotNum})
+		}
+		pageDict.Set("Annots", annotRefs)
+	}
+
 	num := w.AddObject(pageDict)
 	w.pages = append(w.pages, num)
 	return num, nil

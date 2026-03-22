@@ -7,6 +7,7 @@ type PageResult struct {
 	Content []byte
 	Fonts   map[string]FontEntry
 	Images  map[string]ImageEntry
+	Links   []LinkAnnotation
 	Width   float64
 	Height  float64
 }
@@ -27,6 +28,7 @@ func RenderPages(elements []Element, pageWidth, pageHeight, marginTop, marginRig
 				Content: currentCtx.ContentStream,
 				Fonts:   currentCtx.Fonts,
 				Images:  currentCtx.Images,
+				Links:   currentCtx.Links,
 				Width:   pageWidth,
 				Height:  pageHeight,
 			})
@@ -110,6 +112,7 @@ func RenderPages(elements []Element, pageWidth, pageHeight, marginTop, marginRig
 			Content: currentCtx.ContentStream,
 			Fonts:   currentCtx.Fonts,
 			Images:  currentCtx.Images,
+			Links:   currentCtx.Links,
 			Width:   pageWidth,
 			Height:  pageHeight,
 		})

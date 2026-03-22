@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/oarkflow/pdf/core"
+	"github.com/oarkflow/pdf/layout"
 )
 
 func TestNewWriter(t *testing.T) {
@@ -172,5 +173,35 @@ func TestWriterPageMediaBox(t *testing.T) {
 	}
 	if !strings.Contains(data, "100") || !strings.Contains(data, "200") {
 		t.Error("MediaBox dimensions missing")
+	}
+}
+
+func TestWriterAddsLinkAnnotations(t *testing.T) {
+	w := NewWriter()
+	p := NewPage(A4)
+	p.Contents = []byte("BT /F1 12 Tf (Link) Tj ET")
+	p.Annotations = []layout.LinkAnnotation{{
+		X1:  10,
+		Y1:  20,
+		X2:  80,
+		Y2:  32,
+		URI: "https://example.com",
+	}}
+
+	if _, err := w.AddPage(p); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	if _, err := w.WriteTo(&buf); err != nil {
+		t.Fatal(err)
+	}
+
+	data := buf.String()
+	if !strings.Contains(data, "/Annots") {
+		t.Fatal("missing /Annots")
+	}
+	if !strings.Contains(data, "/URI (https://example.com)") {
+		t.Fatal("missing URI annotation")
 	}
 }

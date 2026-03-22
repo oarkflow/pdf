@@ -102,27 +102,62 @@ type DivElement struct {
 	BoxModel layout.BoxModel
 }
 
+// InlineBoxElement renders an inline-block-like box with styled text content.
+type InlineBoxElement struct {
+	Runs       []layout.TextRun
+	Style      *ComputedStyle
+	BoxModel   layout.BoxModel
+	OuterAlign string
+	InnerAlign string
+}
+
 func (e *DivElement) PlanLayout(area layout.LayoutArea) layout.LayoutPlan {
 	bm := e.BoxModel
 	innerWidth := area.Width - bm.TotalHorizontal()
 	if innerWidth <= 0 {
 		innerWidth = area.Width
 	}
-
-	var childBlocks []layout.PlacedBlock
-	consumed := 0.0
-
-	for _, child := range e.Children {
-		childPlan := child.PlanLayout(layout.LayoutArea{Width: innerWidth, Height: math.Max(area.Height, 5000)})
-		for _, b := range childPlan.Blocks {
-			b.X += bm.ContentLeft()
-			b.Y += bm.ContentTop() + consumed
-			childBlocks = append(childBlocks, b)
-		}
-		consumed += childPlan.Consumed
+	contentHeight := area.Height - bm.TotalVertical()
+	if contentHeight < 0 {
+		return layout.LayoutPlan{Status: layout.LayoutNothing}
 	}
 
-	totalHeight := consumed + bm.TotalVertical()
+	var childBlocks []layout.PlacedBlock
+	childY := 0.0
+	remaining := contentHeight
+	var overflowChildren []layout.Element
+
+	for i, child := range e.Children {
+		childPlan := child.PlanLayout(layout.LayoutArea{Width: innerWidth, Height: remaining})
+		switch childPlan.Status {
+		case layout.LayoutFull:
+			for _, b := range childPlan.Blocks {
+				b.X += bm.ContentLeft()
+				b.Y += bm.ContentTop() + childY
+				childBlocks = append(childBlocks, b)
+			}
+			childY += childPlan.Consumed
+			remaining -= childPlan.Consumed
+		case layout.LayoutPartial:
+			for _, b := range childPlan.Blocks {
+				b.X += bm.ContentLeft()
+				b.Y += bm.ContentTop() + childY
+				childBlocks = append(childBlocks, b)
+			}
+			childY += childPlan.Consumed
+			overflowChildren = append([]layout.Element{childPlan.Overflow}, e.Children[i+1:]...)
+			goto buildResult
+		case layout.LayoutNothing:
+			if childY == 0 {
+				return layout.LayoutPlan{Status: layout.LayoutNothing}
+			}
+			overflowChildren = e.Children[i:]
+			goto buildResult
+		}
+	}
+
+buildResult:
+	totalHeight := childY + bm.TotalVertical()
 	w := area.Width
 
 	var allBlocks []layout.PlacedBlock
@@ -140,10 +175,134 @@ func (e *DivElement) PlanLayout(area layout.LayoutArea) layout.LayoutPlan {
 	}
 	allBlocks = append(allBlocks, childBlocks...)
 
+	if len(overflowChildren) > 0 {
+		overflowDiv := &DivElement{
+			Children: overflowChildren,
+			Style:    e.Style,
+			BoxModel: bm,
+		}
+		overflowDiv.BoxModel.MarginTop = 0
+		overflowDiv.BoxModel.BorderTopWidth = 0
+		overflowDiv.BoxModel.PaddingTop = 0
+
+		return layout.LayoutPlan{
+			Status:   layout.LayoutPartial,
+			Consumed: totalHeight,
+			Blocks:   allBlocks,
+			Overflow: overflowDiv,
+		}
+	}
+
 	return layout.LayoutPlan{
 		Status:   layout.LayoutFull,
 		Consumed: totalHeight,
 		Blocks:   allBlocks,
+	}
+}
+
+func (e *InlineBoxElement) PlanLayout(area layout.LayoutArea) layout.LayoutPlan {
+	if len(e.Runs) == 0 {
+		return layout.LayoutPlan{Status: layout.LayoutFull}
+	}
+
+	fontSize := 12.0
+	lineHeightMul := 1.4
+	if e.Style != nil {
+		if e.Style.FontSize > 0 {
+			fontSize = e.Style.FontSize
+		}
+		if e.Style.LineHeight > 0 {
+			lineHeightMul = e.Style.LineHeight
+		}
+	}
+	lineHeight := fontSize * lineHeightMul
+	bm := e.BoxModel
+
+	maxContentWidth := area.Width - bm.TotalHorizontal()
+	if maxContentWidth <= 0 {
+		return layout.LayoutPlan{Status: layout.LayoutNothing}
+	}
+
+	contentWidth := measureRunsForIntrinsicWidth(e.Runs, e.Style)
+	if e.Style != nil && !e.Style.Width.IsAuto() && e.Style.Width.Value > 0 {
+		contentWidth = e.Style.Width.ToPoints(area.Width, fontSize) - bm.TotalHorizontal()
+	}
+	if contentWidth <= 0 {
+		contentWidth = maxContentWidth
+	}
+	if contentWidth > maxContentWidth {
+		contentWidth = maxContentWidth
+	}
+
+	lines := wrapRuns(e.Runs, contentWidth, fontSize)
+	if len(lines) == 0 {
+		return layout.LayoutPlan{Status: layout.LayoutFull}
+	}
+
+	usedContentWidth := 0.0
+	for _, line := range lines {
+		if line.width > usedContentWidth {
+			usedContentWidth = line.width
+		}
+	}
+	if e.Style == nil || e.Style.Width.IsAuto() || e.Style.Width.Value == 0 {
+		contentWidth = usedContentWidth
+	}
+	if contentWidth <= 0 {
+		contentWidth = maxContentWidth
+	}
+
+	totalWidth := contentWidth + bm.TotalHorizontal()
+	totalHeight := float64(len(lines))*lineHeight + bm.TotalVertical()
+
+	return layout.LayoutPlan{
+		Status:   layout.LayoutFull,
+		Consumed: totalHeight,
+		Blocks: []layout.PlacedBlock{{
+			X: 0, Y: 0, Width: totalWidth, Height: totalHeight, Tag: "Span",
+			Draw: func(ctx *layout.DrawContext, x, topY float64) {
+				drawX := x
+				switch e.OuterAlign {
+				case "center":
+					drawX += (area.Width - totalWidth) / 2
+				case "right", "end":
+					drawX += area.Width - totalWidth
+				}
+				if drawX < x {
+					drawX = x
+				}
+
+				drawBoxModel(ctx, drawX, topY, totalWidth, totalHeight, bm)
+
+				textX := drawX + bm.ContentLeft()
+				textY := topY - bm.ContentTop() - fontSize
+				defaultColor := [3]float64{0.2, 0.2, 0.2}
+				if e.Style != nil {
+					defaultColor = e.Style.Color
+				}
+
+				for _, line := range lines {
+					lineX := textX
+					switch e.InnerAlign {
+					case "center":
+						lineX += (contentWidth - line.width) / 2
+					case "right", "end":
+						lineX += contentWidth - line.width
+					}
+					if lineX < textX {
+						lineX = textX
+					}
+					for _, run := range line.runs {
+						fs := run.FontSize
+						if fs <= 0 {
+							fs = fontSize
+						}
+						lineX += drawStyledRun(ctx, run, defaultColor, lineX, textY, textY+fs)
+					}
+					textY -= lineHeight
+				}
+			},
+		}},
 	}
 }
 
@@ -362,14 +521,14 @@ func (e *TableElement) PlanLayout(area layout.LayoutArea) layout.LayoutPlan {
 					ensureFont(ctx, fn)
 
 					// Determine text color
+					tc := [3]float64{0.235, 0.263, 0.341}
 					if cell.IsHeader {
-						tc := [3]float64{1, 1, 1}
+						tc = [3]float64{1, 1, 1}
 						if cell.Style != nil && (cell.Style.Color != [3]float64{}) {
 							tc = cell.Style.Color
 						}
 						ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f rg\n", tc[0], tc[1], tc[2]))
 					} else {
-						tc := [3]float64{0.235, 0.263, 0.341}
 						if cell.Style != nil && (cell.Style.Color != [3]float64{}) {
 							tc = cell.Style.Color
 						}
@@ -407,17 +566,8 @@ func (e *TableElement) PlanLayout(area layout.LayoutArea) layout.LayoutPlan {
 							if runFS <= 0 {
 								runFS = fs
 							}
-							runFn := resolveFontName(runFS, run.Bold || cell.IsHeader, run.Italic)
-							ensureFont(ctx, runFn)
-
-							if run.Color != ([3]float64{}) {
-								ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f rg\n", run.Color[0], run.Color[1], run.Color[2]))
-							}
-
-							text := toWinAnsi(run.Text)
-							ctx.WriteString(fmt.Sprintf("BT\n/%s %.1f Tf\n%.2f %.2f Td\n(%s) Tj\nET\n",
-								runFn, runFS, lineX, textY, escPDF(text)))
-							lineX += measureStr(run.Text, runFS, run.Bold || cell.IsHeader, run.FontName)
+							run.Bold = run.Bold || cell.IsHeader
+							lineX += drawStyledRun(ctx, run, tc, lineX, textY, textY+runFS)
 						}
 						textY -= lh
 					}
@@ -1032,86 +1182,129 @@ func wrapRuns(runs []layout.TextRun, maxWidth, defaultFontSize float64) []wrappe
 		return nil
 	}
 
-	// Split into words
-	type word struct {
-		chars []cr
-		width float64
+	// Split into words and explicit whitespace runs so we preserve
+	// intentional multi-space gaps from utilities like Tailwind's space-x-*.
+	type segment struct {
+		chars     []cr
+		width     float64
+		space     bool
+		breakLine bool
 	}
-	var words []word
+	var segments []segment
 	var cur []cr
+	spaceRun := false
+	flush := func() {
+		if len(cur) == 0 {
+			return
+		}
+		segments = append(segments, segment{
+			chars: append([]cr(nil), cur...),
+			width: measureCR(cur),
+			space: spaceRun,
+		})
+		cur = nil
+	}
 	for _, c := range chars {
-		if c.ch == ' ' || c.ch == '\t' || c.ch == '\n' {
-			if len(cur) > 0 {
-				words = append(words, word{cur, measureCR(cur)})
-				cur = nil
+		switch c.ch {
+		case '\n':
+			flush()
+			segments = append(segments, segment{breakLine: true})
+			spaceRun = false
+			continue
+		case ' ', '\t':
+			if !spaceRun {
+				flush()
+				spaceRun = true
 			}
-			if c.ch == '\n' {
-				words = append(words, word{nil, -1}) // line break
+			if c.ch == '\t' {
+				for i := 0; i < 4; i++ {
+					cur = append(cur, cr{' ', c.run})
+				}
+			} else {
+				cur = append(cur, c)
 			}
 			continue
 		}
+		if spaceRun {
+			flush()
+			spaceRun = false
+		}
 		cur = append(cur, c)
 	}
-	if len(cur) > 0 {
-		words = append(words, word{cur, measureCR(cur)})
-	}
-	if len(words) == 0 {
+	flush()
+	if len(segments) == 0 {
 		return nil
 	}
 
 	var lines []wrappedLine
 	var lineChars []cr
 	lineW := 0.0
-	spaceW := defaultFontSize * 0.25
 
-	for _, w := range words {
-		if w.width < 0 { // forced line break
-			if len(lineChars) > 0 {
-				lines = append(lines, buildLine(lineChars, lineW))
-			} else {
-				lines = append(lines, wrappedLine{})
+	trimTrailingWhitespace := func() {
+		for len(lineChars) > 0 {
+			last := lineChars[len(lineChars)-1]
+			if last.ch != ' ' && last.ch != '\t' {
+				break
 			}
-			lineChars = nil
+			lineW -= charWidth(last.ch, last.run.FontSize, last.run.Bold, last.run.FontName)
+			lineChars = lineChars[:len(lineChars)-1]
+		}
+		if lineW < 0 {
 			lineW = 0
+		}
+	}
+	flushLine := func(forceBlank bool) {
+		trimTrailingWhitespace()
+		if len(lineChars) > 0 {
+			lines = append(lines, buildLine(lineChars, lineW))
+		} else if forceBlank {
+			lines = append(lines, wrappedLine{})
+		}
+		lineChars = nil
+		lineW = 0
+	}
+
+	for _, seg := range segments {
+		if seg.breakLine {
+			flushLine(true)
 			continue
 		}
-		needed := w.width
-		if len(lineChars) > 0 {
-			needed += spaceW
+		if seg.space {
+			if len(lineChars) == 0 {
+				continue
+			}
+			if lineW+seg.width > maxWidth {
+				flushLine(false)
+				continue
+			}
+			lineChars = append(lineChars, seg.chars...)
+			lineW += seg.width
+			continue
 		}
-		if len(lineChars) > 0 && lineW+needed > maxWidth {
-			lines = append(lines, buildLine(lineChars, lineW))
-			lineChars = nil
-			lineW = 0
+		if len(lineChars) > 0 && lineW+seg.width > maxWidth {
+			flushLine(false)
 		}
-		if w.width > maxWidth {
-			for len(w.chars) > 0 {
-				chunk, chunkW, rest := takeCharsFitting(w.chars, maxWidth)
+		if seg.width > maxWidth {
+			wordChars := seg.chars
+			for len(wordChars) > 0 {
+				chunk, chunkW, rest := takeCharsFitting(wordChars, maxWidth-lineW)
 				if len(chunk) == 0 {
-					chunk = w.chars[:1]
-					chunkW = measureCR(chunk)
-					rest = w.chars[1:]
+					chunk, chunkW, rest = takeCharsFitting(wordChars, maxWidth)
 				}
 				lineChars = append(lineChars, chunk...)
 				lineW += chunkW
-				w.chars = rest
-				if len(w.chars) > 0 {
-					lines = append(lines, buildLine(lineChars, lineW))
-					lineChars = nil
-					lineW = 0
+				wordChars = rest
+				if len(wordChars) > 0 {
+					flushLine(false)
 				}
 			}
 			continue
 		}
-		if len(lineChars) > 0 {
-			lineChars = append(lineChars, cr{' ', w.chars[0].run})
-			lineW += spaceW
-		}
-		lineChars = append(lineChars, w.chars...)
-		lineW += w.width
+		lineChars = append(lineChars, seg.chars...)
+		lineW += seg.width
 	}
 	if len(lineChars) > 0 {
-		lines = append(lines, buildLine(lineChars, lineW))
+		flushLine(false)
 	}
 	return lines
 }
@@ -1405,6 +1598,8 @@ func estimateIntrinsicWidth(el layout.Element) float64 {
 			return v.Style.Width.ToPoints(0, 12) + v.BoxModel.TotalHorizontal()
 		}
 		return 100 + v.BoxModel.TotalHorizontal()
+	case *InlineBoxElement:
+		return measureRunsForIntrinsicWidth(v.Runs, v.Style) + v.BoxModel.TotalHorizontal()
 	default:
 		return 0
 	}
@@ -1466,7 +1661,8 @@ func buildLine(chars []cr, width float64) wrappedLine {
 			first = false
 		} else if r.FontName != curRun.FontName || r.FontSize != curRun.FontSize ||
 			r.Bold != curRun.Bold || r.Italic != curRun.Italic ||
-			r.Color != curRun.Color || r.Underline != curRun.Underline {
+			r.Color != curRun.Color || r.Underline != curRun.Underline ||
+			r.Strike != curRun.Strike || r.Link != curRun.Link {
 			flush()
 			curRun = r
 		}
@@ -1630,18 +1826,7 @@ func makeParagraphBlock(lines []wrappedLine, totalHeight, blockWidth, lineHeight
 					if fs <= 0 {
 						fs = cFS
 					}
-					fn := resolveFontName(fs, run.Bold, run.Italic)
-					ensureFont(ctx, fn)
-
-					c := color
-					if run.Color != [3]float64{} {
-						c = run.Color
-					}
-
-					text := toWinAnsi(run.Text)
-					ctx.WriteString(fmt.Sprintf("BT\n/%s %.1f Tf\n%.3f %.3f %.3f rg\n%.2f %.2f Td\n(%s) Tj\nET\n",
-						fn, fs, c[0], c[1], c[2], lineX, textY, escPDF(text)))
-					lineX += measureStr(run.Text, fs, run.Bold, run.FontName)
+					lineX += drawStyledRun(ctx, run, color, lineX, textY, textY+fs)
 				}
 				textY -= cLH
 			}
@@ -1649,35 +1834,44 @@ func makeParagraphBlock(lines []wrappedLine, totalHeight, blockWidth, lineHeight
 	}
 }
 
+func drawStyledRun(ctx *layout.DrawContext, run layout.TextRun, defaultColor [3]float64, x, baselineY, lineTopY float64) float64 {
+	fs := run.FontSize
+	if fs <= 0 {
+		fs = 12
+	}
+	fn := resolveFontName(fs, run.Bold, run.Italic)
+	ensureFont(ctx, fn)
+
+	color := defaultColor
+	if run.Color != ([3]float64{}) {
+		color = run.Color
+	}
+
+	text := toWinAnsi(run.Text)
+	ctx.WriteString(fmt.Sprintf("BT\n/%s %.1f Tf\n%.3f %.3f %.3f rg\n%.2f %.2f Td\n(%s) Tj\nET\n",
+		fn, fs, color[0], color[1], color[2], x, baselineY, escPDF(text)))
+
+	width := measureStr(run.Text, fs, run.Bold, run.FontName)
+	if run.Link != "" && width > 0 {
+		ctx.AddLink(x, lineTopY-fs, x+width, lineTopY, run.Link)
+	}
+	return width
+}
+
 func drawTextRuns(ctx *layout.DrawContext, runs []layout.TextRun, x, topY, fontSize, lineHeight float64) {
-	var parts []string
-	bold := false
-	italic := false
 	color := [3]float64{0.2, 0.2, 0.2}
+	curX := x
 	for _, run := range runs {
-		t := strings.TrimSpace(run.Text)
-		if t == "" {
+		if run.Text == "" {
 			continue
 		}
-		parts = append(parts, t)
-		bold = bold || run.Bold
-		italic = italic || run.Italic
-		if run.Color != ([3]float64{}) {
-			color = run.Color
+		runFS := run.FontSize
+		if runFS <= 0 {
+			runFS = fontSize
 		}
-		if run.FontSize > 0 {
-			fontSize = run.FontSize
-		}
+		curX += drawStyledRun(ctx, run, color, curX, topY-runFS, topY)
 	}
-	if len(parts) == 0 {
-		return
-	}
-	text := toWinAnsi(strings.Join(parts, " "))
-	fn := resolveFontName(fontSize, bold, italic)
-	ensureFont(ctx, fn)
-	textY := topY - fontSize
-	ctx.WriteString(fmt.Sprintf("BT\n/%s %.1f Tf\n%.3f %.3f %.3f rg\n%.2f %.2f Td\n(%s) Tj\nET\n",
-		fn, fontSize, color[0], color[1], color[2], x, textY, escPDF(text)))
+	_ = lineHeight
 }
 
 func resolveFontName(_ float64, bold, italic bool) string {
@@ -1725,7 +1919,7 @@ func toWinAnsi(s string) string {
 			continue
 		}
 		if r >= 160 && r <= 255 {
-			b.WriteRune(r)
+			b.WriteByte(byte(r))
 			continue
 		}
 		// Map common Unicode chars to WinAnsi byte values

@@ -49,6 +49,7 @@ func Quick(text string, outputPath string) error {
 		for name, ie := range pr.Images {
 			p.Images[name] = ie
 		}
+		p.Annotations = pr.Links
 		doc.AddPage(p)
 	}
 
@@ -107,6 +108,7 @@ func FromHTML(htmlContent string, outputPath string, opts ...html.Options) error
 		for name, ie := range pr.Images {
 			p.Images[name] = ie
 		}
+		p.Annotations = pr.Links
 		doc.AddPage(p)
 	}
 
@@ -196,6 +198,7 @@ func FromHTMLStreaming(htmlContent string, out io.Writer, opts ...html.Options) 
 		for name, ie := range pr.Images {
 			p.Images[name] = ie
 		}
+		p.Annotations = pr.Links
 		doc.AddPage(p)
 	}
 
