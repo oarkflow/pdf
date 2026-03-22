@@ -216,6 +216,96 @@ func TestConvertTreatsStyledInlineBlockAsInlineBox(t *testing.T) {
 	}
 }
 
+func TestConvertTailwindShadowClassRendersAsShadowImage(t *testing.T) {
+	htmlInput := `<!DOCTYPE html><html><body><div class="bg-white rounded-lg shadow-lg p-4">Card</div></body></html>`
+	result, err := Convert(htmlInput, Options{UseTailwind: true, DefaultFontSize: 10})
+	if err != nil {
+		t.Fatalf("Convert() error = %v", err)
+	}
+	if len(result.Elements) != 1 {
+		t.Fatalf("elements = %d, want 1", len(result.Elements))
+	}
+
+	card, ok := result.Elements[0].(*DivElement)
+	if !ok {
+		t.Fatalf("element type = %T, want *DivElement", result.Elements[0])
+	}
+	if card.BoxModel.BoxShadow == "" {
+		t.Fatal("expected Tailwind shadow class to populate BoxShadow")
+	}
+
+	plan := card.PlanLayout(layout.LayoutArea{Width: 240, Height: 240})
+	if len(plan.Blocks) == 0 {
+		t.Fatal("expected layout blocks")
+	}
+
+	ctx := layout.NewDrawContext(300, 300)
+	for _, block := range plan.Blocks {
+		if block.Draw != nil {
+			block.Draw(ctx, 20, 260)
+		}
+	}
+
+	if len(ctx.Images) == 0 {
+		t.Fatal("expected shadow image to be registered for Tailwind class")
+	}
+	foundAlpha := false
+	for _, entry := range ctx.Images {
+		if entry.Image != nil && len(entry.Image.AlphaData) > 0 {
+			foundAlpha = true
+			break
+		}
+	}
+	if !foundAlpha {
+		t.Fatal("expected Tailwind shadow image to include alpha data")
+	}
+}
+
+func TestConvertTailwindDynamicShadowClassRendersAsShadowImage(t *testing.T) {
+	htmlInput := `<!DOCTYPE html><html><body><div class="bg-white rounded-lg shadow-[0_10px_15px_-3px_rgb(0_0_0_/_0.12)] p-4">Card</div></body></html>`
+	result, err := Convert(htmlInput, Options{UseTailwind: true, DefaultFontSize: 10})
+	if err != nil {
+		t.Fatalf("Convert() error = %v", err)
+	}
+	if len(result.Elements) != 1 {
+		t.Fatalf("elements = %d, want 1", len(result.Elements))
+	}
+
+	card, ok := result.Elements[0].(*DivElement)
+	if !ok {
+		t.Fatalf("element type = %T, want *DivElement", result.Elements[0])
+	}
+	if got := card.BoxModel.BoxShadow; got != "0 10px 15px -3px rgb(0 0 0 / 0.12)" {
+		t.Fatalf("box shadow = %q", got)
+	}
+
+	plan := card.PlanLayout(layout.LayoutArea{Width: 240, Height: 240})
+	ctx := layout.NewDrawContext(300, 300)
+	for _, block := range plan.Blocks {
+		if block.Draw != nil {
+			block.Draw(ctx, 20, 260)
+		}
+	}
+	if len(ctx.Images) == 0 {
+		t.Fatal("expected dynamic Tailwind shadow image to be registered")
+	}
+}
+
+func TestConvertTailwindShadowColorUtilityAffectsRenderedShadow(t *testing.T) {
+	htmlInput := `<!DOCTYPE html><html><body><div class="bg-white rounded-lg shadow-lg shadow-red-500/25 p-4">Card</div></body></html>`
+	result, err := Convert(htmlInput, Options{UseTailwind: true, DefaultFontSize: 10})
+	if err != nil {
+		t.Fatalf("Convert() error = %v", err)
+	}
+	card, ok := result.Elements[0].(*DivElement)
+	if !ok {
+		t.Fatalf("element type = %T, want *DivElement", result.Elements[0])
+	}
+	if !strings.Contains(card.BoxModel.BoxShadow, "rgba(239, 68, 68, 0.25)") {
+		t.Fatalf("expected red Tailwind shadow color, got %q", card.BoxModel.BoxShadow)
+	}
+}
+
 func TestDrawBoxModelFallsBackForAsymmetricRoundedBorders(t *testing.T) {
 	ctx := layout.NewDrawContext(200, 200)
 	drawBoxModel(ctx, 10, 180, 80, 40, layout.BoxModel{
@@ -250,26 +340,33 @@ func TestDrawBoxModelRendersGradientAndSimpleShadow(t *testing.T) {
 	})
 
 	stream := string(ctx.ContentStream)
-	if !strings.Contains(stream, "0.820 0.835 0.859 rg") {
-		t.Fatalf("expected shadow color in stream, got:\n%s", stream)
+	if !strings.Contains(stream, "/Im1 Do") {
+		t.Fatalf("expected shadow image draw command, got:\n%s", stream)
 	}
 	if count := strings.Count(stream, " re f\n"); count < 10 {
 		t.Fatalf("expected gradient strips in stream, got count=%d\n%s", count, stream)
 	}
-	if len(ctx.ExtGStates) != 0 {
-		t.Fatalf("expected no transparency state for simple shadow, got %v", ctx.ExtGStates)
+	if len(ctx.Images) == 0 {
+		t.Fatal("expected shadow image to be registered")
 	}
 }
 
-func TestDrawBoxModelSkipsUnsupportedBlurredShadow(t *testing.T) {
+func TestDrawBoxModelRendersBlurredMultiLayerShadowAsImage(t *testing.T) {
 	ctx := layout.NewDrawContext(200, 200)
 	drawBoxModel(ctx, 10, 180, 100, 50, layout.BoxModel{
 		BoxShadow: "0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)",
 	})
 
 	stream := string(ctx.ContentStream)
-	if strings.Contains(stream, " rg ") || strings.Contains(stream, "/GS") {
-		t.Fatalf("expected unsupported blurred shadow to be skipped, got:\n%s", stream)
+	if !strings.Contains(stream, "/Im1 Do") {
+		t.Fatalf("expected blurred shadow image draw command, got:\n%s", stream)
+	}
+	entry, ok := ctx.Images["Im1"]
+	if !ok || entry.Image == nil {
+		t.Fatal("expected blurred shadow image to be registered")
+	}
+	if len(entry.Image.AlphaData) == 0 {
+		t.Fatal("expected blurred shadow image to include alpha data")
 	}
 }
 

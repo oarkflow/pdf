@@ -32,7 +32,7 @@ func TestFromHTMLStreamingAppliesEncryption(t *testing.T) {
 	}
 }
 
-func TestFromHTMLStreamingSkipsUnsupportedTailwindShadow(t *testing.T) {
+func TestFromHTMLStreamingEmbedsTailwindShadowAsImage(t *testing.T) {
 	var buf bytes.Buffer
 	err := FromHTMLStreaming(`<html><body><div style="width:200px;height:80px;background:#fff;box-shadow:0 10px 15px -3px rgb(0 0 0 / 0.1)">Card</div></body></html>`, &buf)
 	if err != nil {
@@ -40,7 +40,10 @@ func TestFromHTMLStreamingSkipsUnsupportedTailwindShadow(t *testing.T) {
 	}
 
 	pdfData := buf.String()
-	if strings.Contains(pdfData, "/ExtGState") {
-		t.Fatal("expected unsupported blurred shadow to be omitted")
+	if !strings.Contains(pdfData, "/Subtype /Image") {
+		t.Fatal("expected shadow image XObject to be embedded")
+	}
+	if !strings.Contains(pdfData, "/SMask") {
+		t.Fatal("expected shadow image soft mask for alpha")
 	}
 }

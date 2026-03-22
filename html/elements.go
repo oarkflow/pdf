@@ -12,6 +12,12 @@ import (
 	"github.com/oarkflow/pdf/svg"
 )
 
+const (
+	shadowRasterScale   = 2.0
+	shadowMaxPixelArea  = 4_000_000
+	shadowBlurPadFactor = 2.0
+)
+
 // ParagraphElement renders styled text as a paragraph.
 type ParagraphElement struct {
 	Runs     []layout.TextRun
@@ -2197,34 +2203,23 @@ func drawLinearGradientBackground(ctx *layout.DrawContext, x, y, width, height f
 }
 
 func drawBoxShadow(ctx *layout.DrawContext, x, y, width, height float64, bm layout.BoxModel) {
-	offsetX, offsetY, blur, spread, color, alpha, ok := parseBoxShadow(bm.BoxShadow)
+	layers := parseBoxShadows(bm.BoxShadow)
+	if len(layers) == 0 {
+		return
+	}
+	img, drawX, drawY, drawW, drawH, ok := rasterizeBoxShadowImage(width, height, bm, layers)
 	if !ok {
 		return
 	}
-	if !shouldRenderBoxShadow(bm.BoxShadow, blur, spread, alpha) {
-		return
+	imgName := fmt.Sprintf("Im%d", len(ctx.Images)+1)
+	ctx.Images[imgName] = layout.ImageEntry{
+		PDFName: imgName,
+		Width:   img.Width,
+		Height:  img.Height,
+		Image:   img,
 	}
-	expand := spread + blur*0.5
-	shadowX := x + offsetX - expand
-	shadowY := y - offsetY - expand
-	shadowW := width + expand*2
-	shadowH := height + expand*2
-	if shadowW <= 0 || shadowH <= 0 {
-		return
-	}
-	if hasAnyBoxRadius(bm) {
-		ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f rg %sf\n",
-			color[0], color[1], color[2], roundedRectCorners(
-				shadowX, shadowY, shadowW, shadowH,
-				bm.BorderTopLeftRadius+expand,
-				bm.BorderTopRightRadius+expand,
-				bm.BorderBottomRightRadius+expand,
-				bm.BorderBottomLeftRadius+expand,
-			)))
-		return
-	}
-	ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f rg %.2f %.2f %.2f %.2f re f\n",
-		color[0], color[1], color[2], shadowX, shadowY, shadowW, shadowH))
+	ctx.WriteString(fmt.Sprintf("q %.2f 0 0 %.2f %.2f %.2f cm /%s Do Q\n",
+		drawW, drawH, x+drawX, y+drawY, imgName))
 }
 
 func drawBoxSides(ctx *layout.DrawContext, x, topY, width, height float64, bm layout.BoxModel) {
@@ -2409,26 +2404,50 @@ func interpolateColor(start, end [3]float64, t float64) [3]float64 {
 	}
 }
 
-func parseBoxShadow(value string) (float64, float64, float64, float64, [3]float64, float64, bool) {
-	layer := strings.TrimSpace(firstTopLevelCSSLayer(value))
+type boxShadowLayer struct {
+	OffsetX float64
+	OffsetY float64
+	Blur    float64
+	Spread  float64
+	Color   [3]float64
+	Alpha   float64
+	Inset   bool
+}
+
+func parseBoxShadows(value string) []boxShadowLayer {
+	var layers []boxShadowLayer
+	for _, rawLayer := range splitTopLevelCSV(value) {
+		layer, ok := parseBoxShadowLayer(rawLayer)
+		if ok && !layer.Inset && layer.Alpha > 0 {
+			layers = append(layers, layer)
+		}
+	}
+	return layers
+}
+
+func parseBoxShadowLayer(value string) (boxShadowLayer, bool) {
+	layer := strings.TrimSpace(value)
 	if layer == "" || strings.EqualFold(layer, "none") {
-		return 0, 0, 0, 0, [3]float64{}, 0, false
+		return boxShadowLayer{}, false
 	}
 	parts := splitCSSValues(layer)
 	if len(parts) < 2 {
-		return 0, 0, 0, 0, [3]float64{}, 0, false
+		return boxShadowLayer{}, false
 	}
-	color := [3]float64{0.75, 0.75, 0.75}
-	alpha := 1.0
+	shadow := boxShadowLayer{
+		Color: [3]float64{0, 0, 0},
+		Alpha: 1,
+	}
 	var lengths []float64
 	for _, part := range parts {
 		lower := strings.ToLower(part)
 		if lower == "inset" {
-			return 0, 0, 0, 0, [3]float64{}, 0, false
+			shadow.Inset = true
+			continue
 		}
 		if c, a, ok := parseColorWithAlpha(part); ok {
-			color = c
-			alpha = a
+			shadow.Color = c
+			shadow.Alpha = a
 			continue
 		}
 		length := parseLength(part)
@@ -2437,30 +2456,272 @@ func parseBoxShadow(value string) (float64, float64, float64, float64, [3]float6
 		}
 	}
 	if len(lengths) < 2 {
-		return 0, 0, 0, 0, [3]float64{}, 0, false
+		return boxShadowLayer{}, false
 	}
-	blur := 0.0
-	spread := 0.0
+	shadow.OffsetX = lengths[0]
+	shadow.OffsetY = lengths[1]
 	if len(lengths) > 2 {
-		blur = lengths[2]
+		shadow.Blur = lengths[2]
 	}
 	if len(lengths) > 3 {
-		spread = lengths[3]
+		shadow.Spread = lengths[3]
 	}
-	return lengths[0], lengths[1], blur, spread, color, alpha, true
+	return shadow, true
 }
 
-func shouldRenderBoxShadow(value string, blur, spread, alpha float64) bool {
-	if len(splitTopLevelCSV(value)) > 1 {
+func rasterizeBoxShadowImage(width, height float64, bm layout.BoxModel, layers []boxShadowLayer) (*pdfimage.Image, float64, float64, float64, float64, bool) {
+	minX, minY := 0.0, 0.0
+	maxX, maxY := 0.0, 0.0
+	visible := false
+	for _, layer := range layers {
+		if layer.Inset || layer.Alpha <= 0 {
+			continue
+		}
+		pad := shadowBlurPadding(layer.Blur)
+		left := layer.OffsetX - layer.Spread - pad
+		right := layer.OffsetX + layer.Spread + pad
+		bottom := -layer.OffsetY - layer.Spread - pad
+		top := -layer.OffsetY + layer.Spread + pad
+		if !visible {
+			minX, minY, maxX, maxY = left, bottom, right, top
+			visible = true
+			continue
+		}
+		minX = math.Min(minX, left)
+		minY = math.Min(minY, bottom)
+		maxX = math.Max(maxX, right)
+		maxY = math.Max(maxY, top)
+	}
+	if !visible {
+		return nil, 0, 0, 0, 0, false
+	}
+
+	drawX := minX
+	drawY := minY
+	drawW := width + (maxX - minX)
+	drawH := height + (maxY - minY)
+	if drawW <= 0 || drawH <= 0 {
+		return nil, 0, 0, 0, 0, false
+	}
+
+	scale := shadowRasterScale
+	if area := drawW * drawH * scale * scale; area > shadowMaxPixelArea {
+		scale = math.Sqrt(shadowMaxPixelArea / (drawW * drawH))
+		if scale < 1 {
+			scale = 1
+		}
+	}
+
+	pixelW := maxInt(1, int(math.Ceil(drawW*scale)))
+	pixelH := maxInt(1, int(math.Ceil(drawH*scale)))
+	rgba := make([]byte, pixelW*pixelH*3)
+	alpha := make([]byte, pixelW*pixelH)
+
+	originX := -minX
+	originY := -minY
+	for _, layer := range layers {
+		if layer.Inset || layer.Alpha <= 0 {
+			continue
+		}
+		renderShadowLayerInto(rgba, alpha, pixelW, pixelH, width, height, bm, layer, originX, originY, scale)
+	}
+
+	hasAlpha := false
+	for _, a := range alpha {
+		if a > 0 {
+			hasAlpha = true
+			break
+		}
+	}
+	if !hasAlpha {
+		return nil, 0, 0, 0, 0, false
+	}
+
+	img := &pdfimage.Image{
+		Width:       pixelW,
+		Height:      pixelH,
+		ColorSpace:  "DeviceRGB",
+		BitsPerComp: 8,
+		Data:        rgba,
+		AlphaData:   alpha,
+		Filter:      "FlateDecode",
+	}
+	return img, drawX, drawY, drawW, drawH, true
+}
+
+func renderShadowLayerInto(dstRGB, dstAlpha []byte, pixelW, pixelH int, width, height float64, bm layout.BoxModel, layer boxShadowLayer, originX, originY, scale float64) {
+	rectX := (originX + layer.OffsetX - layer.Spread) * scale
+	rectY := (originY - layer.OffsetY - layer.Spread) * scale
+	rectW := math.Max(1, (width+2*layer.Spread)*scale)
+	rectH := math.Max(1, (height+2*layer.Spread)*scale)
+
+	tl := math.Max(0, (bm.BorderTopLeftRadius+layer.Spread)*scale)
+	tr := math.Max(0, (bm.BorderTopRightRadius+layer.Spread)*scale)
+	br := math.Max(0, (bm.BorderBottomRightRadius+layer.Spread)*scale)
+	bl := math.Max(0, (bm.BorderBottomLeftRadius+layer.Spread)*scale)
+
+	mask := make([]float64, pixelW*pixelH)
+	fillRoundedRectMask(mask, pixelW, pixelH, rectX, rectY, rectW, rectH, tl, tr, br, bl)
+
+	if layer.Blur > 0 {
+		blurRadiusPx := int(math.Ceil(layer.Blur * scale / 2))
+		if blurRadiusPx > 0 {
+			mask = boxBlurAlpha(mask, pixelW, pixelH, blurRadiusPx, 3)
+		}
+	}
+
+	for y := 0; y < pixelH; y++ {
+		for x := 0; x < pixelW; x++ {
+			idx := y*pixelW + x
+			srcA := clamp01(mask[idx] * layer.Alpha)
+			if srcA <= 0 {
+				continue
+			}
+			blendPixel(dstRGB, dstAlpha, idx, layer.Color, srcA)
+		}
+	}
+}
+
+func fillRoundedRectMask(mask []float64, pixelW, pixelH int, x, y, w, h, tl, tr, br, bl float64) {
+	minX := maxInt(0, int(math.Floor(x)))
+	maxX := minInt(pixelW, int(math.Ceil(x+w)))
+	minY := maxInt(0, int(math.Floor(y)))
+	maxY := minInt(pixelH, int(math.Ceil(y+h)))
+	for py := minY; py < maxY; py++ {
+		cy := float64(py) + 0.5
+		for px := minX; px < maxX; px++ {
+			cx := float64(px) + 0.5
+			if pointInRoundedRect(cx, cy, x, y, w, h, tl, tr, br, bl) {
+				mask[py*pixelW+px] = 1
+			}
+		}
+	}
+}
+
+func pointInRoundedRect(px, py, x, y, w, h, tl, tr, br, bl float64) bool {
+	if px < x || py < y || px > x+w || py > y+h {
 		return false
 	}
-	if blur != 0 || spread != 0 {
-		return false
+	if bl > 0 && px < x+bl && py < y+bl {
+		dx := px - (x + bl)
+		dy := py - (y + bl)
+		return dx*dx+dy*dy <= bl*bl
 	}
-	if alpha != 1 {
-		return false
+	if br > 0 && px > x+w-br && py < y+br {
+		dx := px - (x + w - br)
+		dy := py - (y + br)
+		return dx*dx+dy*dy <= br*br
+	}
+	if tr > 0 && px > x+w-tr && py > y+h-tr {
+		dx := px - (x + w - tr)
+		dy := py - (y + h - tr)
+		return dx*dx+dy*dy <= tr*tr
+	}
+	if tl > 0 && px < x+tl && py > y+h-tl {
+		dx := px - (x + tl)
+		dy := py - (y + h - tl)
+		return dx*dx+dy*dy <= tl*tl
 	}
 	return true
+}
+
+func boxBlurAlpha(src []float64, width, height, radius, passes int) []float64 {
+	if radius <= 0 {
+		return src
+	}
+	cur := src
+	for i := 0; i < passes; i++ {
+		cur = boxBlurPass(cur, width, height, radius)
+	}
+	return cur
+}
+
+func boxBlurPass(src []float64, width, height, radius int) []float64 {
+	tmp := make([]float64, len(src))
+	dst := make([]float64, len(src))
+	window := radius*2 + 1
+
+	for y := 0; y < height; y++ {
+		sum := 0.0
+		for x := -radius; x <= radius; x++ {
+			sum += src[y*width+clampInt(x, 0, width-1)]
+		}
+		for x := 0; x < width; x++ {
+			tmp[y*width+x] = sum / float64(window)
+			left := clampInt(x-radius, 0, width-1)
+			right := clampInt(x+radius+1, 0, width-1)
+			sum += src[y*width+right] - src[y*width+left]
+		}
+	}
+
+	for x := 0; x < width; x++ {
+		sum := 0.0
+		for y := -radius; y <= radius; y++ {
+			sum += tmp[clampInt(y, 0, height-1)*width+x]
+		}
+		for y := 0; y < height; y++ {
+			dst[y*width+x] = sum / float64(window)
+			top := clampInt(y-radius, 0, height-1)
+			bottom := clampInt(y+radius+1, 0, height-1)
+			sum += tmp[bottom*width+x] - tmp[top*width+x]
+		}
+	}
+	return dst
+}
+
+func blendPixel(dstRGB, dstAlpha []byte, idx int, color [3]float64, srcA float64) {
+	dstA := float64(dstAlpha[idx]) / 255
+	outA := srcA + dstA*(1-srcA)
+	if outA <= 0 {
+		return
+	}
+	base := idx * 3
+	dstR := float64(dstRGB[base]) / 255
+	dstG := float64(dstRGB[base+1]) / 255
+	dstB := float64(dstRGB[base+2]) / 255
+
+	outR := (color[0]*srcA + dstR*dstA*(1-srcA)) / outA
+	outG := (color[1]*srcA + dstG*dstA*(1-srcA)) / outA
+	outB := (color[2]*srcA + dstB*dstA*(1-srcA)) / outA
+
+	dstRGB[base] = uint8(math.Round(clamp01(outR) * 255))
+	dstRGB[base+1] = uint8(math.Round(clamp01(outG) * 255))
+	dstRGB[base+2] = uint8(math.Round(clamp01(outB) * 255))
+	dstAlpha[idx] = uint8(math.Round(clamp01(outA) * 255))
+}
+
+func shadowBlurPadding(blur float64) float64 {
+	if blur <= 0 {
+		return 0
+	}
+	return math.Ceil(blur * shadowBlurPadFactor)
+}
+
+func clamp01(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
+}
+
+func clampInt(v, minV, maxV int) int {
+	if v < minV {
+		return minV
+	}
+	if v > maxV {
+		return maxV
+	}
+	return v
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 type backgroundTile struct {
