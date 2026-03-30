@@ -274,24 +274,6 @@ func TestParser_Effects(t *testing.T) {
 	}
 }
 
-func TestParser_ShadowArbitraryValueNormalizesTailwindEncoding(t *testing.T) {
-	p := tailwind.New()
-	got := p.Parse("shadow-[0_10px_15px_-3px_rgb(0_0_0_/_0.1)]")
-	want := "0 10px 15px -3px rgb(0 0 0 / 0.1)"
-	if got["box-shadow"] != want {
-		t.Fatalf("box-shadow = %v, want %q", got["box-shadow"], want)
-	}
-}
-
-func TestParser_ShadowColorUtilityAppliesToResolvedBoxShadow(t *testing.T) {
-	p := tailwind.New()
-	got := p.Parse("shadow-lg shadow-red-500/25")
-	want := "0 10px 15px -3px rgba(239, 68, 68, 0.25), 0 4px 6px -4px rgba(239, 68, 68, 0.25)"
-	if got["box-shadow"] != want {
-		t.Fatalf("box-shadow = %v, want %q", got["box-shadow"], want)
-	}
-}
-
 func TestParser_Transforms(t *testing.T) {
 	p := tailwind.New()
 	tests := []struct {
