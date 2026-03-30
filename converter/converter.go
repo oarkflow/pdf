@@ -263,16 +263,7 @@ func detectHeadings(lines []Line) []Line {
 	return lines
 }
 
-func avgFontSize(spans []StyledSpan) float64 {
-	if len(spans) == 0 {
-		return 0
-	}
-	var total float64
-	for _, s := range spans {
-		total += s.FontSize
-	}
-	return total / float64(len(spans))
-}
+// avgFontSize is in html_builder.go
 
 func isBoldLine(line Line) bool {
 	for _, s := range line.Spans {
