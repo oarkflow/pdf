@@ -7,12 +7,13 @@ import (
 
 // fontInfo holds parsed font data for text extraction.
 type fontInfo struct {
-	name      string
-	encoding  string // /WinAnsiEncoding, /MacRomanEncoding, etc.
-	toUnicode map[uint16]rune
-	widths    map[int]float64
-	baseFont  string
-	isType0   bool
+	name        string
+	encoding    string // /WinAnsiEncoding, /MacRomanEncoding, etc.
+	toUnicode   map[uint16]rune
+	differences map[byte]string // /Differences array from encoding dict
+	widths      map[int]float64
+	baseFont    string
+	isType0     bool
 }
 
 // parseFontInfo extracts font info from a font dictionary.
@@ -46,6 +47,18 @@ func parseFontInfo(resolver *Resolver, fontDict map[string]interface{}) (*fontIn
 	enc, _ = resolver.ResolveReference(enc)
 	if s, ok := enc.(string); ok {
 		fi.encoding = s
+	} else if encDict, ok := enc.(map[string]interface{}); ok {
+		// Encoding dictionary with /BaseEncoding and /Differences.
+		if base, ok := encDict["/BaseEncoding"].(string); ok {
+			fi.encoding = base
+		}
+		// Parse /Differences array.
+		if diffRef, ok := encDict["/Differences"]; ok {
+			diffObj, _ := resolver.ResolveReference(diffRef)
+			if diffArr, ok := diffObj.([]interface{}); ok {
+				fi.differences = parseDifferences(diffArr)
+			}
+		}
 	}
 
 	// ToUnicode CMap.
@@ -215,4 +228,100 @@ func parseHexRune(t Token) int {
 		return int(v)
 	}
 	return -1
+}
+
+// parseDifferences parses a PDF /Differences array.
+// The format is: [code /name1 /name2 ... code /name3 ...]
+// where code sets the starting character code and subsequent names map sequentially.
+func parseDifferences(arr []interface{}) map[byte]string {
+	result := make(map[byte]string)
+	code := 0
+	for _, item := range arr {
+		switch v := item.(type) {
+		case int64:
+			code = int(v)
+		case float64:
+			code = int(v)
+		case int:
+			code = v
+		case string:
+			if strings.HasPrefix(v, "/") {
+				if code >= 0 && code <= 255 {
+					result[byte(code)] = v[1:] // strip leading /
+				}
+				code++
+			}
+		}
+	}
+	return result
+}
+
+// GlyphNameToUnicode maps common Adobe glyph names to Unicode runes.
+var GlyphNameToUnicode = map[string]rune{
+	"space": ' ', "exclam": '!', "quotedbl": '"', "numbersign": '#',
+	"dollar": '$', "percent": '%', "ampersand": '&', "quotesingle": '\'',
+	"parenleft": '(', "parenright": ')', "asterisk": '*', "plus": '+',
+	"comma": ',', "hyphen": '-', "period": '.', "slash": '/',
+	"zero": '0', "one": '1', "two": '2', "three": '3',
+	"four": '4', "five": '5', "six": '6', "seven": '7',
+	"eight": '8', "nine": '9', "colon": ':', "semicolon": ';',
+	"less": '<', "equal": '=', "greater": '>', "question": '?',
+	"at": '@',
+	"A": 'A', "B": 'B', "C": 'C', "D": 'D', "E": 'E', "F": 'F',
+	"G": 'G', "H": 'H', "I": 'I', "J": 'J', "K": 'K', "L": 'L',
+	"M": 'M', "N": 'N', "O": 'O', "P": 'P', "Q": 'Q', "R": 'R',
+	"S": 'S', "T": 'T', "U": 'U', "V": 'V', "W": 'W', "X": 'X',
+	"Y": 'Y', "Z": 'Z',
+	"bracketleft": '[', "backslash": '\\', "bracketright": ']',
+	"asciicircum": '^', "underscore": '_', "grave": '`',
+	"a": 'a', "b": 'b', "c": 'c', "d": 'd', "e": 'e', "f": 'f',
+	"g": 'g', "h": 'h', "i": 'i', "j": 'j', "k": 'k', "l": 'l',
+	"m": 'm', "n": 'n', "o": 'o', "p": 'p', "q": 'q', "r": 'r',
+	"s": 's', "t": 't', "u": 'u', "v": 'v', "w": 'w', "x": 'x',
+	"y": 'y', "z": 'z',
+	"braceleft": '{', "bar": '|', "braceright": '}', "asciitilde": '~',
+	// Extended Latin
+	"Agrave": 'À', "Aacute": 'Á', "Acircumflex": 'Â', "Atilde": 'Ã',
+	"Adieresis": 'Ä', "Aring": 'Å', "AE": 'Æ', "Ccedilla": 'Ç',
+	"Egrave": 'È', "Eacute": 'É', "Ecircumflex": 'Ê', "Edieresis": 'Ë',
+	"Igrave": 'Ì', "Iacute": 'Í', "Icircumflex": 'Î', "Idieresis": 'Ï',
+	"Eth": 'Ð', "Ntilde": 'Ñ', "Ograve": 'Ò', "Oacute": 'Ó',
+	"Ocircumflex": 'Ô', "Otilde": 'Õ', "Odieresis": 'Ö', "multiply": '×',
+	"Oslash": 'Ø', "Ugrave": 'Ù', "Uacute": 'Ú', "Ucircumflex": 'Û',
+	"Udieresis": 'Ü', "Yacute": 'Ý', "Thorn": 'Þ', "germandbls": 'ß',
+	"agrave": 'à', "aacute": 'á', "acircumflex": 'â', "atilde": 'ã',
+	"adieresis": 'ä', "aring": 'å', "ae": 'æ', "ccedilla": 'ç',
+	"egrave": 'è', "eacute": 'é', "ecircumflex": 'ê', "edieresis": 'ë',
+	"igrave": 'ì', "iacute": 'í', "icircumflex": 'î', "idieresis": 'ï',
+	"eth": 'ð', "ntilde": 'ñ', "ograve": 'ò', "oacute": 'ó',
+	"ocircumflex": 'ô', "otilde": 'õ', "odieresis": 'ö', "divide": '÷',
+	"oslash": 'ø', "ugrave": 'ù', "uacute": 'ú', "ucircumflex": 'û',
+	"udieresis": 'ü', "yacute": 'ý', "thorn": 'þ', "ydieresis": 'ÿ',
+	// Common symbols
+	"bullet": '•', "endash": '–', "emdash": '—',
+	"quotedblleft": '\u201C', "quotedblright": '\u201D',
+	"quoteleft": '\u2018', "quoteright": '\u2019',
+	"ellipsis": '…', "trademark": '™', "copyright": '©', "registered": '®',
+	"degree": '°', "plusminus": '±', "mu": 'µ', "paragraph": '¶',
+	"section": '§', "Euro": '€', "sterling": '£', "yen": '¥',
+	"cent": '¢', "currency": '¤',
+	"fi": '\uFB01', "fl": '\uFB02',
+	"dagger": '†', "daggerdbl": '‡',
+	"guillemotleft": '«', "guillemotright": '»',
+	"guilsinglleft": '‹', "guilsinglright": '›',
+	"fraction": '⁄', "minus": '−',
+	"periodcentered": '·', "quotesinglbase": '‚', "quotedblbase": '„',
+	"perthousand": '‰',
+	"Scaron": 'Š', "scaron": 'š', "Zcaron": 'Ž', "zcaron": 'ž',
+	"OE": 'Œ', "oe": 'œ', "Ydieresis": 'Ÿ',
+	"lozenge": '◊', "dotlessi": 'ı',
+	"circumflex": 'ˆ', "tilde": '˜', "macron": '¯',
+	"breve": '˘', "dotaccent": '˙', "ring": '˚',
+	"cedilla": '¸', "hungarumlaut": '˝', "ogonek": '˛', "caron": 'ˇ',
+	"nbspace": '\u00A0', "exclamdown": '¡', "questiondown": '¿',
+	"logicalnot": '¬', "radical": '√', "florin": 'ƒ',
+	"approxequal": '≈', "Delta": 'Δ', "notequal": '≠',
+	"lessequal": '≤', "greaterequal": '≥', "infinity": '∞',
+	"integral": '∫', "summation": '∑', "product": '∏',
+	"pi": 'π', "Omega": 'Ω', "partialdiff": '∂',
 }

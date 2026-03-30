@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PDF → HTML Converter</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=JetBrains+Mono:wght@300;400;500;600&family=Source+Serif+4:opsz,wght@8..60,300;8..60,400;8..60,600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="app">
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-inner">
+        <header class="brand">
+          <div class="brand-mark">
+            <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+              <rect x="2" y="4" width="20" height="26" rx="2" stroke="var(--accent)" stroke-width="2"/>
+              <rect x="10" y="2" width="20" height="26" rx="2" fill="var(--surface-dark)" stroke="var(--accent)" stroke-width="2"/>
+              <line x1="14" y1="10" x2="26" y2="10" stroke="var(--accent)" stroke-width="1.5" opacity="0.6"/>
+              <line x1="14" y1="15" x2="24" y2="15" stroke="var(--accent)" stroke-width="1.5" opacity="0.4"/>
+              <line x1="14" y1="20" x2="22" y2="20" stroke="var(--accent)" stroke-width="1.5" opacity="0.2"/>
+            </svg>
+          </div>
+          <div class="brand-text">
+            <h1>PDF<span class="accent">→</span>HTML</h1>
+            <p class="brand-sub">Document Converter</p>
+          </div>
+        </header>
+
+        <!-- Upload Zone -->
+        <section class="upload-section">
+          <div class="upload-zone" id="uploadZone">
+            <input type="file" id="fileInput" accept=".pdf" multiple hidden>
+            <div class="upload-idle" id="uploadIdle">
+              <div class="upload-icon">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                  <polyline points="17 8 12 3 7 8"/>
+                  <line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+              </div>
+              <p class="upload-label">Drop PDF here</p>
+              <p class="upload-hint">or click to browse</p>
+            </div>
+            <div class="upload-hover" id="uploadHover">
+              <div class="upload-hover-ring"></div>
+              <p>Release to upload</p>
+            </div>
+          </div>
+          <div class="password-row" id="passwordRow" style="display:none">
+            <input type="password" id="passwordInput" placeholder="PDF password (if encrypted)" class="input-field">
+          </div>
+        </section>
+
+        <!-- File List -->
+        <section class="file-list-section" id="fileListSection" style="display:none">
+          <div class="section-header">
+            <h3>Files</h3>
+            <button class="btn-ghost" id="clearAllBtn" title="Clear all">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+          <ul class="file-list" id="fileList"></ul>
+        </section>
+
+        <!-- Conversion Options -->
+        <section class="options-section" id="optionsSection" style="display:none">
+          <div class="section-header">
+            <h3>Options</h3>
+          </div>
+
+          <div class="option-group">
+            <label class="option-label">Render Mode</label>
+            <div class="toggle-group">
+              <button class="toggle-btn active" data-mode="reflowed" id="modeReflowed">Reflowed</button>
+              <button class="toggle-btn" data-mode="positioned" id="modePositioned">Positioned</button>
+            </div>
+          </div>
+
+          <div class="option-group">
+            <label class="option-label">Page Range</label>
+            <input type="text" id="pageRange" placeholder="All pages (e.g. 1-3, 5, 7)" class="input-field">
+          </div>
+
+          <div class="option-group">
+            <label class="checkbox-label">
+              <input type="checkbox" id="extractImages" checked>
+              <span class="checkmark"></span>
+              Extract images
+            </label>
+          </div>
+
+          <div class="option-group">
+            <label class="checkbox-label">
+              <input type="checkbox" id="detectTables" checked>
+              <span class="checkmark"></span>
+              Detect tables
+            </label>
+          </div>
+        </section>
+
+        <!-- Convert Button -->
+        <section class="convert-section" id="convertSection" style="display:none">
+          <button class="btn-convert" id="convertBtn">
+            <span class="btn-convert-text">Convert to HTML</span>
+            <span class="btn-convert-arrow">→</span>
+          </button>
+          <div class="progress-container" id="progressContainer" style="display:none">
+            <div class="progress-bar">
+              <div class="progress-fill" id="progressFill"></div>
+            </div>
+            <p class="progress-text" id="progressText">Converting…</p>
+          </div>
+        </section>
+
+        <footer class="sidebar-footer">
+          <span class="footer-text">Built with Go</span>
+          <span class="footer-dot">·</span>
+          <span class="footer-text">oarkflow/pdf</span>
+        </footer>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="content" id="content">
+      <!-- Empty State -->
+      <div class="empty-state" id="emptyState">
+        <div class="empty-illustration">
+          <div class="empty-page page-1"></div>
+          <div class="empty-page page-2"></div>
+          <div class="empty-page page-3"></div>
+        </div>
+        <h2>Upload a PDF to begin</h2>
+        <p>Drag and drop a file into the sidebar, or click the upload zone to browse your files.</p>
+      </div>
+
+      <!-- Result View -->
+      <div class="result-view" id="resultView" style="display:none">
+        <!-- Toolbar -->
+        <div class="toolbar">
+          <div class="tab-group">
+            <button class="tab-btn active" data-tab="preview" id="tabPreview">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+              Preview
+            </button>
+            <button class="tab-btn" data-tab="source" id="tabSource">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+              Source
+            </button>
+          </div>
+          <div class="toolbar-actions">
+            <button class="btn-action" id="copyBtn" title="Copy HTML">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+              <span>Copy</span>
+            </button>
+            <button class="btn-action btn-primary" id="downloadBtn" title="Download HTML">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              <span>Download</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Preview Panel -->
+        <div class="preview-panel" id="previewPanel">
+          <iframe id="previewFrame" sandbox="allow-same-origin" title="HTML Preview"></iframe>
+        </div>
+
+        <!-- Source Panel -->
+        <div class="source-panel" id="sourcePanel" style="display:none">
+          <pre><code id="sourceCode"></code></pre>
+        </div>
+
+        <!-- Metadata Bar -->
+        <div class="metadata-bar" id="metadataBar">
+          <div class="meta-items" id="metaItems"></div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Toast notification -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

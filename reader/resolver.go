@@ -69,27 +69,51 @@ func NewResolver(data []byte) (*Resolver, error) {
 // Trailer returns the trailer dictionary.
 func (r *Resolver) Trailer() (map[string]interface{}, error) {
 	startxref := r.findStartXRef()
-	if startxref < 0 {
-		return nil, fmt.Errorf("startxref not found")
+	if startxref >= 0 {
+		tok := NewTokenizer(r.data)
+		tok.Seek(int(startxref))
+
+		// Could be xref table or xref stream.
+		t, _ := tok.Peek()
+		if t.Type == TokenKeyword && t.Value == "xref" {
+			// Traditional xref table: skip to trailer.
+			d, err := r.parseTrailerDict(tok)
+			if err == nil {
+				return d, nil
+			}
+		} else {
+			// xref stream: parse the stream object dict.
+			obj := r.parseObjectAt(int(startxref))
+			if so, ok := obj.(*StreamObject); ok {
+				return so.Dict, nil
+			}
+			if d, ok := obj.(map[string]interface{}); ok {
+				return d, nil
+			}
+		}
+	}
+
+	// Fallback: scan backwards for the last "trailer" keyword.
+	return r.scanForTrailer()
+}
+
+// scanForTrailer scans the PDF data for the last "trailer" keyword followed
+// by a dictionary. This handles PDFs where startxref points to invalid data.
+func (r *Resolver) scanForTrailer() (map[string]interface{}, error) {
+	idx := bytes.LastIndex(r.data, []byte("trailer"))
+	if idx < 0 {
+		return nil, fmt.Errorf("could not find trailer")
 	}
 	tok := NewTokenizer(r.data)
-	tok.Seek(int(startxref))
-
-	// Could be xref table or xref stream.
-	t, _ := tok.Peek()
-	if t.Type == TokenKeyword && t.Value == "xref" {
-		// Traditional xref table: skip to trailer.
-		return r.parseTrailerDict(tok)
-	}
-	// xref stream: parse the stream object dict.
-	obj := r.parseObjectAt(int(startxref))
-	if so, ok := obj.(*StreamObject); ok {
-		return so.Dict, nil
+	tok.Seek(idx + len("trailer"))
+	obj, err := r.parseObject(tok)
+	if err != nil {
+		return nil, fmt.Errorf("could not parse trailer dictionary: %w", err)
 	}
 	if d, ok := obj.(map[string]interface{}); ok {
 		return d, nil
 	}
-	return nil, fmt.Errorf("could not parse trailer")
+	return nil, fmt.Errorf("trailer is not a dictionary")
 }
 
 func (r *Resolver) parseTrailerDict(tok *Tokenizer) (map[string]interface{}, error) {
@@ -135,9 +159,113 @@ func (r *Resolver) findStartXRef() int64 {
 func (r *Resolver) parseXRef() error {
 	startxref := r.findStartXRef()
 	if startxref < 0 {
-		return fmt.Errorf("startxref not found")
+		// No startxref found — fall back to linear scan.
+		r.linearScanObjects()
+		if len(r.xref) == 0 {
+			return fmt.Errorf("startxref not found and linear scan found no objects")
+		}
+		return nil
 	}
-	return r.parseXRefAt(int(startxref))
+	err := r.parseXRefAt(int(startxref))
+	if err != nil || len(r.xref) == 0 {
+		// xref parsing failed — fall back to linear scan.
+		r.linearScanObjects()
+		if len(r.xref) == 0 {
+			if err != nil {
+				return err
+			}
+			return fmt.Errorf("xref table is empty")
+		}
+	}
+	return nil
+}
+
+// linearScanObjects scans the entire PDF byte stream for "N G obj" patterns
+// and records their offsets. This is a fallback for PDFs with corrupt or
+// non-standard xref tables.
+func (r *Resolver) linearScanObjects() {
+	// Pattern: <number> <number> obj
+	// We look for this at line boundaries.
+	data := r.data
+	i := 0
+	for i < len(data) {
+		// Skip to a position that could be the start of a line.
+		// Look for digit at current position.
+		if i > 0 && data[i-1] != '\n' && data[i-1] != '\r' {
+			// Advance to next line.
+			for i < len(data) && data[i] != '\n' && data[i] != '\r' {
+				i++
+			}
+			for i < len(data) && (data[i] == '\n' || data[i] == '\r') {
+				i++
+			}
+			continue
+		}
+
+		// Try to parse: <integer> <integer> obj
+		start := i
+		objNum, n1 := scanInt(data[i:])
+		if n1 == 0 || objNum < 0 {
+			i++
+			continue
+		}
+		j := i + n1
+		if j >= len(data) || !isWhitespace(data[j]) {
+			i++
+			continue
+		}
+		for j < len(data) && isWhitespace(data[j]) {
+			j++
+		}
+		genNum, n2 := scanInt(data[j:])
+		if n2 == 0 || genNum < 0 {
+			i++
+			continue
+		}
+		j += n2
+		if j >= len(data) || !isWhitespace(data[j]) {
+			i++
+			continue
+		}
+		for j < len(data) && isWhitespace(data[j]) {
+			j++
+		}
+		if j+3 <= len(data) && string(data[j:j+3]) == "obj" &&
+			(j+3 >= len(data) || isWhitespace(data[j+3]) || data[j+3] == '<' || data[j+3] == '/') {
+			// Found "N G obj".
+			if _, exists := r.xref[int(objNum)]; !exists {
+				r.xref[int(objNum)] = XRefEntry{
+					Offset:     int64(start),
+					Generation: int(genNum),
+				}
+			}
+		}
+
+		// Advance to next line.
+		for i < len(data) && data[i] != '\n' && data[i] != '\r' {
+			i++
+		}
+		for i < len(data) && (data[i] == '\n' || data[i] == '\r') {
+			i++
+		}
+	}
+}
+
+// scanInt reads a non-negative integer from the start of data, returning
+// the value and the number of bytes consumed. Returns (0, 0) if no integer found.
+func scanInt(data []byte) (int64, int) {
+	n := 0
+	for n < len(data) && data[n] >= '0' && data[n] <= '9' {
+		n++
+	}
+	if n == 0 || n > 10 {
+		return 0, 0
+	}
+	val, err := strconv.ParseInt(string(data[:n]), 10, 64)
+	if err != nil {
+		return 0, 0
+	}
+	return val, n
 }
 
 func (r *Resolver) parseXRefAt(offset int) error {
@@ -344,6 +472,14 @@ func (r *Resolver) parseObjectAt(offset int) interface{} {
 		if end > len(r.data) {
 			end = len(r.data)
 		}
+
+		// Validate: if length seems wrong, search for "endstream" marker.
+		if length == 0 || end > len(r.data) || !r.hasEndstreamAt(end) {
+			if esPos := r.findEndstream(p); esPos > p {
+				end = esPos
+			}
+		}
+
 		streamData := r.data[p:end]
 		if r.crypt != nil && objNum != r.crypt.encryptObjNum {
 			decrypted, err := core.DecryptData(streamData, r.crypt.key, objNum, genNum, r.crypt.algorithm)
@@ -361,6 +497,48 @@ func (r *Resolver) parseObjectAt(offset int) interface{} {
 	}
 
 	return obj
+}
+
+// hasEndstreamAt checks whether the "endstream" keyword appears at or very near pos.
+func (r *Resolver) hasEndstreamAt(pos int) bool {
+	const keyword = "endstream"
+	// Allow a small window (whitespace before endstream).
+	start := pos
+	if start > len(r.data) {
+		return false
+	}
+	// Skip optional whitespace (CR, LF, space).
+	for start < len(r.data) && (r.data[start] == '\r' || r.data[start] == '\n' || r.data[start] == ' ') {
+		start++
+	}
+	end := start + len(keyword)
+	if end > len(r.data) {
+		return false
+	}
+	return string(r.data[start:end]) == keyword
+}
+
+// findEndstream searches forward from startPos for the "endstream" keyword
+// and returns the position just before it (i.e., the end of stream data).
+// Returns -1 if not found within a reasonable range.
+func (r *Resolver) findEndstream(startPos int) int {
+	const keyword = "endstream"
+	// Search up to 10MB from start to avoid scanning entire huge files.
+	limit := startPos + 10*1024*1024
+	if limit > len(r.data) {
+		limit = len(r.data)
+	}
+	searchRegion := r.data[startPos:limit]
+	idx := bytes.Index(searchRegion, []byte(keyword))
+	if idx < 0 {
+		return -1
+	}
+	pos := startPos + idx
+	// Strip trailing whitespace before "endstream".
+	for pos > startPos && (r.data[pos-1] == '\r' || r.data[pos-1] == '\n') {
+		pos--
+	}
+	return pos
 }
 
 // parseObject parses a single PDF object from the tokenizer.
@@ -675,10 +853,24 @@ func (r *Resolver) DecompressStream(streamDict map[string]interface{}, streamDat
 func flateDecompress(data []byte) ([]byte, error) {
 	rd, err := zlib.NewReader(bytes.NewReader(data))
 	if err != nil {
-		return nil, err
+		// Try trimming trailing garbage (common with inaccurate /Length).
+		for trim := 1; trim <= 16 && trim < len(data); trim++ {
+			rd, err = zlib.NewReader(bytes.NewReader(data[:len(data)-trim]))
+			if err == nil {
+				break
+			}
+		}
+		if err != nil {
+			return nil, err
+		}
 	}
 	defer rd.Close()
-	return core.LimitedReadAll(rd, 100*1024*1024) // 100 MB limit
+	result, err := core.LimitedReadAll(rd, 100*1024*1024) // 100 MB limit
+	if err != nil && len(result) > 0 {
+		// Return partial data — better than nothing for corrupt streams.
+		return result, nil
+	}
+	return result, err
 }
 
 func asciiHexDecode(data []byte) []byte {
@@ -716,7 +908,8 @@ func ascii85Decode(data []byte) ([]byte, error) {
 		}
 	}
 	if len(buf) > 1 {
-		// Pad with 'u' and decode partial group.
+		// Partial group: pad with 'u' (84) and decode, producing n-1 output bytes.
+		n := len(buf) // save original length before padding
 		for len(buf) < 5 {
 			buf = append(buf, 'u')
 		}
@@ -724,21 +917,8 @@ func ascii85Decode(data []byte) ([]byte, error) {
 		for _, b := range buf {
 			val = val*85 + uint32(b-'!')
 		}
-		n := len(buf) - 1
-		for i := 0; i < n-0; i++ {
-			// we need (original_len - 1) output bytes
-		}
-		// Actually produce the correct number of bytes
-		all := []byte{byte(val >> 24), byte(val >> 16), byte(val >> 8), byte(val)}
-		origLen := len(buf) - 4 // buf was padded; original was shorter
-		_ = origLen
-		// Partial group of n input chars produces n-1 output bytes.
-		partial := len(s)
-		_ = partial
-		// Recalculate: the buf before padding had some length.
-		// We padded from some length to 5, so output n-1 bytes where n = original buf len.
-		// We already set buf to 5, original length we don't have. Let's redo.
-		out = append(out, all[:len(buf)-4+1-1]...)
+		all := [4]byte{byte(val >> 24), byte(val >> 16), byte(val >> 8), byte(val)}
+		out = append(out, all[:n-1]...)
 	}
 	return out, nil
 }
