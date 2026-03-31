@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	pdffont "github.com/oarkflow/pdf/font"
 	pdfimage "github.com/oarkflow/pdf/image"
 	"github.com/oarkflow/pdf/layout"
 	"github.com/oarkflow/pdf/svg"
@@ -1648,7 +1649,11 @@ func wrapRuns(runs []layout.TextRun, maxWidth, defaultFontSize float64) []wrappe
 			if last.ch != ' ' && last.ch != '\t' {
 				break
 			}
-			lineW -= charWidth(last.ch, last.run.FontSize, last.run.Bold, last.run.FontName)
+			if last.run.FontFace != nil {
+				lineW -= charWidthWithFace(last.ch, last.run.FontSize, last.run.FontFace)
+			} else {
+				lineW -= charWidth(last.ch, last.run.FontSize, last.run.Bold, last.run.FontName)
+			}
 			lineChars = lineChars[:len(lineChars)-1]
 		}
 		if lineW < 0 {
@@ -1717,7 +1722,11 @@ type charRun = cr
 func measureCR(chars []cr) float64 {
 	w := 0.0
 	for _, c := range chars {
-		w += charWidth(c.ch, c.run.FontSize, c.run.Bold, c.run.FontName)
+		if c.run.FontFace != nil {
+			w += charWidthWithFace(c.ch, c.run.FontSize, c.run.FontFace)
+		} else {
+			w += charWidth(c.ch, c.run.FontSize, c.run.Bold, c.run.FontName)
+		}
 	}
 	return w
 }
@@ -1727,10 +1736,17 @@ func takeCharsFitting(chars []cr, maxWidth float64) ([]cr, float64, []cr) {
 		return nil, 0, nil
 	}
 
+	charW := func(c cr) float64 {
+		if c.run.FontFace != nil {
+			return charWidthWithFace(c.ch, c.run.FontSize, c.run.FontFace)
+		}
+		return charWidth(c.ch, c.run.FontSize, c.run.Bold, c.run.FontName)
+	}
+
 	width := 0.0
 	idx := 0
 	for idx < len(chars) {
-		chW := charWidth(chars[idx].ch, chars[idx].run.FontSize, chars[idx].run.Bold, chars[idx].run.FontName)
+		chW := charW(chars[idx])
 		if idx > 0 && width+chW > maxWidth {
 			break
 		}
@@ -1739,7 +1755,7 @@ func takeCharsFitting(chars []cr, maxWidth float64) ([]cr, float64, []cr) {
 	}
 	if idx == 0 {
 		idx = 1
-		width = charWidth(chars[0].ch, chars[0].run.FontSize, chars[0].run.Bold, chars[0].run.FontName)
+		width = charW(chars[0])
 	}
 
 	return chars[:idx], width, chars[idx:]
@@ -1939,7 +1955,12 @@ func measureRunsForColumnSizing(runs []layout.TextRun, defaultFontSize float64) 
 				flushToken()
 				lineWidth += fontSize * 0.25
 			default:
-				chWidth := charWidth(ch, fontSize, run.Bold, run.FontName)
+				var chWidth float64
+				if run.FontFace != nil {
+					chWidth = charWidthWithFace(ch, fontSize, run.FontFace)
+				} else {
+					chWidth = charWidth(ch, fontSize, run.Bold, run.FontName)
+				}
 				tokenWidth += chWidth
 				lineWidth += chWidth
 			}
@@ -2059,7 +2080,11 @@ func measureRunsForIntrinsicWidth(runs []layout.TextRun, style *ComputedStyle) f
 				lineWidth = 0
 				continue
 			}
-			lineWidth += charWidth(ch, fs, run.Bold, run.FontName)
+			if run.FontFace != nil {
+				lineWidth += charWidthWithFace(ch, fs, run.FontFace)
+			} else {
+				lineWidth += charWidth(ch, fs, run.Bold, run.FontName)
+			}
 		}
 	}
 	if lineWidth > maxLine {
@@ -2108,6 +2133,24 @@ func buildLine(chars []cr, width float64) wrappedLine {
 // ---------------------------------------------------------------------------
 // Character width using Helvetica metrics
 // ---------------------------------------------------------------------------
+
+// charWidthWithFace returns the width of a single character in points using
+// actual font metrics when a FontFace is available.
+func charWidthWithFace(ch rune, fontSize float64, face pdffont.Face) float64 {
+	if face == nil {
+		return charWidth(ch, fontSize, false, "")
+	}
+	upem := face.UnitsPerEm()
+	if upem <= 0 {
+		return charWidth(ch, fontSize, false, "")
+	}
+	gid := face.GlyphIndex(ch)
+	adv := face.GlyphAdvance(gid)
+	if adv == 0 {
+		return charWidth(ch, fontSize, false, "")
+	}
+	return fontSize * float64(adv) / float64(upem)
+}
 
 // charWidth returns the width of a single character in points.
 func charWidth(ch rune, fontSize float64, bold bool, fontName string) float64 {
@@ -2272,19 +2315,29 @@ func drawStyledRun(ctx *layout.DrawContext, run layout.TextRun, defaultColor [3]
 	if fs <= 0 {
 		fs = 12
 	}
-	fn := resolveFontName(fs, run.Bold, run.Italic)
-	ensureFont(ctx, fn)
+	fontName := resolveFontName(fs, run.Bold, run.Italic)
+	text := toWinAnsi(run.Text)
+	if run.FontFace != nil {
+		fontName = run.FontName
+		if strings.TrimSpace(fontName) == "" {
+			fontName = run.FontFace.PostScriptName()
+		}
+		text = run.Text
+	}
+	fn, operand := layout.PrepareTextOperand(ctx, fontName, run.Bold, run.Italic, run.FontFace, text)
 
 	color := defaultColor
 	if run.Color != ([3]float64{}) {
 		color = run.Color
 	}
 
-	text := toWinAnsi(run.Text)
-	ctx.WriteString(fmt.Sprintf("BT\n/%s %.1f Tf\n%.3f %.3f %.3f rg\n%.2f %.2f Td\n(%s) Tj\nET\n",
-		fn, fs, color[0], color[1], color[2], x, baselineY, escPDF(text)))
+	ctx.WriteString(fmt.Sprintf("BT\n/%s %.1f Tf\n%.3f %.3f %.3f rg\n%.2f %.2f Td\n%s Tj\nET\n",
+		fn, fs, color[0], color[1], color[2], x, baselineY, operand))
 
 	width := measureStr(run.Text, fs, run.Bold, run.FontName)
+	if run.FontFace != nil {
+		width = measureStrWithFace(run.Text, fs, run.FontFace)
+	}
 	if run.Link != "" && width > 0 {
 		ctx.AddLink(x, lineTopY-fs, x+width, lineTopY, run.Link)
 	}
@@ -2486,7 +2539,7 @@ func resolveFontName(_ float64, bold, italic bool) string {
 
 func ensureFont(ctx *layout.DrawContext, fontName string) {
 	if _, ok := ctx.Fonts[fontName]; !ok {
-		ctx.Fonts[fontName] = layout.FontEntry{PDFName: fontName}
+		ctx.Fonts[fontName] = layout.FontEntry{PDFName: fontName, Name: fontName}
 	}
 }
 
@@ -2496,6 +2549,27 @@ func measureStr(s string, fontSize float64, bold bool, fontName string) float64 
 		w += charWidth(ch, fontSize, bold, fontName)
 	}
 	return w
+}
+
+// measureStrWithFace measures string width using real font metrics.
+func measureStrWithFace(s string, fontSize float64, face pdffont.Face) float64 {
+	if face == nil {
+		return measureStr(s, fontSize, false, "")
+	}
+	upem := face.UnitsPerEm()
+	if upem <= 0 {
+		return measureStr(s, fontSize, false, "")
+	}
+	var totalAdv int
+	for _, r := range s {
+		gid := face.GlyphIndex(r)
+		adv := face.GlyphAdvance(gid)
+		if adv == 0 {
+			adv = upem / 2
+		}
+		totalAdv += adv
+	}
+	return float64(totalAdv) * fontSize / float64(upem)
 }
 
 func escPDF(s string) string {

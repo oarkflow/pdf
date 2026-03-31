@@ -6,22 +6,24 @@ import (
 	"io"
 
 	"github.com/oarkflow/pdf/core"
+	pdffont "github.com/oarkflow/pdf/font"
 	pdfimage "github.com/oarkflow/pdf/image"
+	"github.com/oarkflow/pdf/layout"
 )
 
 // Writer serializes PDF objects into a complete PDF file.
 //
 // Writer is not safe for concurrent use. Callers must synchronize access externally.
 type Writer struct {
-	objects   []core.PdfIndirectObject
-	pages     []int // object numbers of page objects
-	info      *core.PdfDictionary
-	nextObj   int
-	fontObjs  map[string]int // font name -> object number (cached)
+	objects  []core.PdfIndirectObject
+	pages    []int // object numbers of page objects
+	info     *core.PdfDictionary
+	nextObj  int
+	fontObjs map[string]int // font name -> object number (cached)
 
 	// PDF/A fields
-	metadataRef   int              // object number for /Metadata on catalog
-	outputIntents []int            // object numbers for /OutputIntents array
+	metadataRef   int   // object number for /Metadata on catalog
+	outputIntents []int // object numbers for /OutputIntents array
 	docIDPair     [2]core.PdfHexString
 	hasDocID      bool
 
@@ -75,6 +77,27 @@ func (w *Writer) ensureStandardFont(name string) int {
 	return num
 }
 
+func (w *Writer) addEmbeddedFont(entry layout.FontEntry) int {
+	ef := entry.Embedded
+	if ef == nil && entry.Face != nil {
+		ef = pdffont.NewEmbeddedFont(entry.Face, entry.PDFName)
+	}
+	if ef == nil {
+		return 0
+	}
+
+	objects := ef.BuildObjects(func() int {
+		return w.ReserveObject()
+	})
+	if len(objects) == 0 {
+		return 0
+	}
+	for _, obj := range objects {
+		w.FillReserved(obj.Reference.ObjectNumber, obj.Object)
+	}
+	return objects[len(objects)-1].Reference.ObjectNumber
+}
+
 // AddPage creates a page indirect object from the given Page and records it for
 // the pages tree. The parent reference is patched later during WriteTo.
 // Returns the object number of the page object.
@@ -94,18 +117,37 @@ func (w *Writer) AddPage(page *Page) (int, error) {
 		}
 	}
 
-	// Handle fonts: create font objects for standard font names
-	if len(page.Fonts) > 0 {
+	// Handle fonts: embedded fonts are page-local so glyph subsetting stays correct.
+	if len(page.FontEntries) > 0 || len(page.Fonts) > 0 {
 		fontDict := core.NewDictionary()
-		for name, objNum := range page.Fonts {
-			if objNum > 0 {
-				// Already has an object number
-				fontDict.Set(name, core.PdfIndirectReference{ObjectNumber: objNum})
-			} else {
-				// Create a standard font object
-				fontObjNum := w.ensureStandardFont(name)
-				fontDict.Set(name, core.PdfIndirectReference{ObjectNumber: fontObjNum})
+		for resourceName, entry := range page.FontEntries {
+			objNum := entry.ObjectNum
+			if entry.Embedded != nil || (entry.Face != nil && !pdffont.IsStandardFont(entry.Face.PostScriptName())) {
+				objNum = w.addEmbeddedFont(entry)
+			} else if objNum == 0 {
+				fontName := resourceName
+				if entry.Name != "" {
+					fontName = entry.Name
+				}
+				if entry.Face != nil && pdffont.IsStandardFont(entry.Face.PostScriptName()) {
+					fontName = entry.Face.PostScriptName()
+				}
+				fontObjNum := w.ensureStandardFont(fontName)
+				objNum = fontObjNum
 			}
+			if objNum == 0 {
+				continue
+			}
+			fontDict.Set(resourceName, core.PdfIndirectReference{ObjectNumber: objNum})
+		}
+		for name, objNum := range page.Fonts {
+			if page.FontEntries[name].PDFName != "" {
+				continue
+			}
+			if objNum == 0 {
+				objNum = w.ensureStandardFont(name)
+			}
+			fontDict.Set(name, core.PdfIndirectReference{ObjectNumber: objNum})
 		}
 		res.Set("Font", fontDict)
 	}

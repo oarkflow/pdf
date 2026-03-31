@@ -2,7 +2,9 @@ package layout
 
 import (
 	"fmt"
-	"strings"
+	"unicode/utf8"
+
+	pdffont "github.com/oarkflow/pdf/font"
 )
 
 // Paragraph is a text paragraph element with word wrapping, alignment, and line spacing.
@@ -45,9 +47,60 @@ func NewStyledParagraph(runs ...TextRun) *Paragraph {
 	}
 }
 
-// measureText approximates text width using fontSize * 0.5 per character.
+// measureText approximates text width using fontSize * 0.5 per rune.
+// For multi-byte scripts (e.g. Devanagari) the previous len(text) (byte count)
+// gave wildly wrong results. We now count runes.
 func measureText(text string, fontSize float64) float64 {
-	return float64(len(text)) * fontSize * 0.5
+	return float64(utf8.RuneCountInString(text)) * fontSize * 0.5
+}
+
+// measureRunWidth returns the width of text in points using actual font
+// metrics when a FontFace is available, falling back to the rune-count
+// heuristic otherwise.
+func measureRunWidth(text string, fontSize float64, face pdffont.Face) float64 {
+	if face == nil {
+		return measureText(text, fontSize)
+	}
+	upem := face.UnitsPerEm()
+	if upem <= 0 {
+		return measureText(text, fontSize)
+	}
+	var totalAdv int
+	var prevGID uint16
+	first := true
+	for _, r := range text {
+		gid := face.GlyphIndex(r)
+		adv := face.GlyphAdvance(gid)
+		if adv == 0 {
+			// Glyph not found in font — fall back to average width
+			adv = upem / 2
+		}
+		if !first {
+			totalAdv += face.Kern(prevGID, gid)
+		}
+		totalAdv += adv
+		prevGID = gid
+		first = false
+	}
+	return float64(totalAdv) * fontSize / float64(upem)
+}
+
+// measureCharWidth returns the width of a single rune in points using font
+// metrics, falling back to fontSize * 0.5.
+func measureCharWidth(ch rune, fontSize float64, face pdffont.Face) float64 {
+	if face == nil {
+		return fontSize * 0.5
+	}
+	upem := face.UnitsPerEm()
+	if upem <= 0 {
+		return fontSize * 0.5
+	}
+	gid := face.GlyphIndex(ch)
+	adv := face.GlyphAdvance(gid)
+	if adv == 0 {
+		return fontSize * 0.5
+	}
+	return float64(adv) * fontSize / float64(upem)
 }
 
 // splitRunsIntoWords splits text runs into measured words.
@@ -69,8 +122,8 @@ func splitRunsIntoWords(runs []TextRun) []Word {
 		if ci.ch == ' ' || ci.ch == '\t' {
 			if len(currentWord) > 0 {
 				w := buildWord(currentWord)
-				// Space width based on first run's font size
-				w.Space = currentWord[0].run.FontSize * 0.5
+				// Space width based on first run's font metrics
+				w.Space = measureCharWidth(' ', currentWord[0].run.FontSize, currentWord[0].run.FontFace)
 				words = append(words, w)
 				currentWord = nil
 			}
@@ -101,7 +154,7 @@ func buildWord(chars []charInfo) Word {
 	// Group consecutive chars with same style into runs
 	currentRun := chars[0].run
 	currentRun.Text = string(chars[0].ch)
-	width += chars[0].run.FontSize * 0.5
+	width += measureCharWidth(chars[0].ch, chars[0].run.FontSize, chars[0].run.FontFace)
 
 	for i := 1; i < len(chars); i++ {
 		if sameStyle(chars[i].run, currentRun) {
@@ -111,7 +164,7 @@ func buildWord(chars []charInfo) Word {
 			currentRun = chars[i].run
 			currentRun.Text = string(chars[i].ch)
 		}
-		width += chars[i].run.FontSize * 0.5
+		width += measureCharWidth(chars[i].ch, chars[i].run.FontSize, chars[i].run.FontFace)
 	}
 	runs = append(runs, currentRun)
 
@@ -342,9 +395,7 @@ func drawLine(ctx *DrawContext, ln Line, x, pdfY, areaWidth float64, align Align
 	curX := startX
 	for i, w := range ln.Words {
 		for _, r := range w.Runs {
-			// Escape PDF string
-			escaped := pdfEscapeString(r.Text)
-			fontKey := ensureFont(ctx, r.FontName, r.Bold, r.Italic)
+			fontKey, operand := PrepareTextOperand(ctx, r.FontName, r.Bold, r.Italic, r.FontFace, r.Text)
 
 			// Set color
 			ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f rg\n", r.Color[0], r.Color[1], r.Color[2]))
@@ -352,10 +403,10 @@ func drawLine(ctx *DrawContext, ln Line, x, pdfY, areaWidth float64, align Align
 			ctx.WriteString("BT\n")
 			ctx.WriteString(fmt.Sprintf("/%s %.1f Tf\n", fontKey, r.FontSize))
 			ctx.WriteString(fmt.Sprintf("%.2f %.2f Td\n", curX, pdfY-ln.Ascent))
-			ctx.WriteString(fmt.Sprintf("(%s) Tj\n", escaped))
+			ctx.WriteString(fmt.Sprintf("%s Tj\n", operand))
 			ctx.WriteString("ET\n")
 
-			curX += measureText(r.Text, r.FontSize)
+			curX += measureRunWidth(r.Text, r.FontSize, r.FontFace)
 		}
 		if i < len(ln.Words)-1 {
 			if align == AlignJustify && !isLast {
@@ -368,29 +419,9 @@ func drawLine(ctx *DrawContext, ln Line, x, pdfY, areaWidth float64, align Align
 }
 
 func pdfEscapeString(s string) string {
-	s = strings.ReplaceAll(s, "\\", "\\\\")
-	s = strings.ReplaceAll(s, "(", "\\(")
-	s = strings.ReplaceAll(s, ")", "\\)")
-	return s
+	return escapePDFText(s)
 }
 
 func ensureFont(ctx *DrawContext, name string, bold, italic bool) string {
-	suffix := ""
-	if bold {
-		suffix += "-Bold"
-	}
-	if italic {
-		suffix += "-Oblique"
-	}
-	fullName := name + suffix
-
-	if entry, ok := ctx.Fonts[fullName]; ok {
-		return entry.PDFName
-	}
-
-	pdfName := fmt.Sprintf("F%d", len(ctx.Fonts)+1)
-	ctx.Fonts[fullName] = FontEntry{
-		PDFName: pdfName,
-	}
-	return pdfName
+	return EnsureFontResource(ctx, name, bold, italic, nil)
 }

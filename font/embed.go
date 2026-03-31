@@ -31,9 +31,29 @@ func (ef *EmbeddedFont) AddRune(r rune) uint16 {
 		return gid
 	}
 	gid := ef.Face.GlyphIndex(r)
+	// If glyph is missing (0), try common substitutions.
+	if gid == 0 {
+		if sub, ok := glyphSubstitutions[r]; ok {
+			if subGid := ef.Face.GlyphIndex(sub); subGid != 0 {
+				gid = subGid
+				r = sub
+			}
+		}
+	}
 	ef.usedGlyphs[gid] = r
 	ef.usedRunes[r] = gid
 	return gid
+}
+
+// glyphSubstitutions maps characters to fallback alternatives when the
+// primary glyph is missing from a font.
+var glyphSubstitutions = map[rune]rune{
+	'\u00A0': ' ',  // NBSP → regular space
+	'\u2002': ' ',  // EN SPACE → regular space
+	'\u2003': ' ',  // EM SPACE → regular space
+	'\u2009': ' ',  // THIN SPACE → regular space
+	'\u200A': ' ',  // HAIR SPACE → regular space
+	'\u202F': ' ',  // NARROW NO-BREAK SPACE → regular space
 }
 
 // AddString records all runes in s as used.

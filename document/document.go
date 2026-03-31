@@ -191,6 +191,7 @@ func (d *Document) WriteTo(w io.Writer) (int64, error) {
 			Resources:   page.Resources,
 			Contents:    content,
 			Fonts:       page.Fonts,
+			FontEntries: page.FontEntries,
 			Images:      page.Images,
 			Annotations: page.Annotations,
 		}
@@ -290,6 +291,7 @@ func (d *Document) WriteStreamingTo(w io.Writer) error {
 			Resources:   page.Resources,
 			Contents:    content,
 			Fonts:       page.Fonts,
+			FontEntries: page.FontEntries,
 			Images:      page.Images,
 			Annotations: page.Annotations,
 		}

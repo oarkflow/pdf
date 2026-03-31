@@ -3,6 +3,7 @@ package layout
 import (
 	"fmt"
 
+	pdffont "github.com/oarkflow/pdf/font"
 	pdfimage "github.com/oarkflow/pdf/image"
 )
 
@@ -102,8 +103,10 @@ func (ctx *DrawContext) EnsureExtGState(fillAlpha, strokeAlpha float64) string {
 // FontEntry tracks a font used on a page.
 type FontEntry struct {
 	PDFName   string // /F1, /F2, etc.
+	Name      string
 	ObjectNum int
-	Face      interface{} // font.Face
+	Face      pdffont.Face
+	Embedded  *pdffont.EmbeddedFont
 }
 
 // ImageEntry tracks an image used on a page.
@@ -126,6 +129,7 @@ type TextRun struct {
 	Text      string
 	FontName  string
 	FontSize  float64
+	FontFace  pdffont.Face
 	Bold      bool
 	Italic    bool
 	Color     [3]float64 // RGB 0-1

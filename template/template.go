@@ -87,8 +87,8 @@ func (t *Template) Render(data interface{}) (*document.Document, error) {
 	for _, pr := range pages {
 		p := document.NewPage(document.PageSize{Width: pr.Width, Height: pr.Height})
 		p.Contents = pr.Content
-		for name, fe := range pr.Fonts {
-			p.Fonts[name] = fe.ObjectNum
+		for _, fe := range pr.Fonts {
+			p.FontEntries[fe.PDFName] = fe
 		}
 		for name, ie := range pr.Images {
 			p.Images[name] = ie

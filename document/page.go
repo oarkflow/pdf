@@ -34,6 +34,7 @@ type Page struct {
 	Resources   *core.PdfDictionary
 	Contents    []byte
 	Fonts       map[string]int // font name -> object number
+	FontEntries map[string]layout.FontEntry
 	Images      map[string]layout.ImageEntry
 	Annotations []layout.LinkAnnotation
 }
@@ -41,9 +42,10 @@ type Page struct {
 // NewPage creates a new page with the given size.
 func NewPage(size PageSize) *Page {
 	return &Page{
-		Size:      size,
-		Resources: core.NewDictionary(),
-		Fonts:     make(map[string]int),
-		Images:    make(map[string]layout.ImageEntry),
+		Size:        size,
+		Resources:   core.NewDictionary(),
+		Fonts:       make(map[string]int),
+		FontEntries: make(map[string]layout.FontEntry),
+		Images:      make(map[string]layout.ImageEntry),
 	}
 }

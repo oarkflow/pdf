@@ -5,7 +5,9 @@ import (
 	"io"
 
 	"github.com/oarkflow/pdf/core"
+	pdffont "github.com/oarkflow/pdf/font"
 	pdfimage "github.com/oarkflow/pdf/image"
+	"github.com/oarkflow/pdf/layout"
 )
 
 // StreamingWriter writes PDF objects directly to an io.Writer as they are added,
@@ -93,6 +95,27 @@ func (sw *StreamingWriter) ensureStandardFont(name string) (int, error) {
 	return num, nil
 }
 
+func (sw *StreamingWriter) addEmbeddedFont(entry layout.FontEntry) (int, error) {
+	ef := entry.Embedded
+	if ef == nil && entry.Face != nil {
+		ef = pdffont.NewEmbeddedFont(entry.Face, entry.PDFName)
+	}
+	if ef == nil {
+		return 0, nil
+	}
+
+	objects := ef.BuildObjects(sw.allocObj)
+	if len(objects) == 0 {
+		return 0, nil
+	}
+	for _, obj := range objects {
+		if err := sw.writeIndirectObject(obj.Reference.ObjectNumber, obj.Object); err != nil {
+			return 0, err
+		}
+	}
+	return objects[len(objects)-1].Reference.ObjectNumber, nil
+}
+
 // addImageObject writes an image XObject immediately and returns its object number.
 func (sw *StreamingWriter) addImageObject(img *pdfimage.Image) (int, error) {
 	if img == nil {
@@ -148,18 +171,44 @@ func (sw *StreamingWriter) AddPage(page *Page) (int, error) {
 	}
 
 	// Fonts.
-	if len(page.Fonts) > 0 {
+	if len(page.FontEntries) > 0 || len(page.Fonts) > 0 {
 		fontDict := core.NewDictionary()
-		for name, objNum := range page.Fonts {
-			if objNum > 0 {
-				fontDict.Set(name, core.PdfIndirectReference{ObjectNumber: objNum})
-			} else {
-				fontObjNum, err := sw.ensureStandardFont(name)
+		for resourceName, entry := range page.FontEntries {
+			objNum := entry.ObjectNum
+			if entry.Embedded != nil || (entry.Face != nil && !pdffont.IsStandardFont(entry.Face.PostScriptName())) {
+				objNum, err = sw.addEmbeddedFont(entry)
 				if err != nil {
 					return 0, err
 				}
-				fontDict.Set(name, core.PdfIndirectReference{ObjectNumber: fontObjNum})
+			} else if objNum == 0 {
+				fontName := resourceName
+				if entry.Name != "" {
+					fontName = entry.Name
+				}
+				if entry.Face != nil && pdffont.IsStandardFont(entry.Face.PostScriptName()) {
+					fontName = entry.Face.PostScriptName()
+				}
+				objNum, err = sw.ensureStandardFont(fontName)
+				if err != nil {
+					return 0, err
+				}
 			}
+			if objNum == 0 {
+				continue
+			}
+			fontDict.Set(resourceName, core.PdfIndirectReference{ObjectNumber: objNum})
+		}
+		for name, objNum := range page.Fonts {
+			if page.FontEntries[name].PDFName != "" {
+				continue
+			}
+			if objNum == 0 {
+				objNum, err = sw.ensureStandardFont(name)
+				if err != nil {
+					return 0, err
+				}
+			}
+			fontDict.Set(name, core.PdfIndirectReference{ObjectNumber: objNum})
 		}
 		res.Set("Font", fontDict)
 	}

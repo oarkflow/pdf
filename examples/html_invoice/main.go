@@ -18,6 +18,7 @@ import (
 
 	"github.com/oarkflow/pdf"
 	"github.com/oarkflow/pdf/core"
+	pdffont "github.com/oarkflow/pdf/font"
 	"github.com/oarkflow/pdf/html"
 	"github.com/oarkflow/pdf/template"
 )
@@ -225,6 +226,109 @@ func main() {
 			fmt.Println("Generated invoice_tailwind_protected.pdf (password: open-sesame)")
 		}
 	}
+
+	// Generate passport sifarish patra (recommendation letter) PDF
+	generatePassportSifarish()
+}
+
+func generatePassportSifarish() {
+	// Example data for passport sifarish patra
+	passportData := map[string]any{
+		// Letterhead / Office details
+		"municipality_name": "बुटवल उपमहानगरपालिका",
+		"ward_number":       "१२",
+		"district":          "रूपन्देही",
+		"province":          "लुम्बिनी प्रदेश",
+		"office_phone":      "०७१-५४०१२३",
+		"office_email":      "ward12@butwalmunicipality.gov.np",
+
+		// Letter metadata
+		"letter_serial_no": "०८७",
+		"fiscal_year":      "२०८२/८३",
+		"date_bs":          "२०८२/१२/१७",
+		"date_ad":          "2026-03-31",
+
+		// Applicant personal details (Nepali)
+		"applicant_full_name_nepali":  "राम बहादुर खत्री",
+		"applicant_full_name_english": "Ram Bahadur Khatri",
+		"dob_bs":                      "२०४५/०५/२०",
+		"dob_ad":                      "1988-09-05",
+		"birth_place":                 "बुटवल, रूपन्देही",
+		"gender":                      "पुरुष",
+
+		// Citizenship details
+		"citizenship_no":              "१२३-४५६-७८९",
+		"citizenship_issued_district": "रूपन्देही",
+		"citizenship_issued_date":     "२०६३/०१/१५",
+
+		// Family details
+		"father_name":      "कृष्ण बहादुर खत्री",
+		"mother_name":      "सीता देवी खत्री",
+		"grandfather_name": "धन बहादुर खत्री",
+		"spouse_name":      "गीता खत्री",
+
+		// Permanent address
+		"permanent_ward_no":      "१२",
+		"permanent_municipality": "बुटवल उपमहानगरपालिका",
+		"permanent_district":     "रूपन्देही",
+
+		// Current address
+		"current_ward_no":      "१२",
+		"current_municipality": "बुटवल उपमहानगरपालिका",
+		"current_district":     "रूपन्देही",
+
+		// Contact & passport type
+		"applicant_phone": "९८४७०१२३४५",
+		"passport_type":   "साधारण (Ordinary)",
+
+		// Signature section
+		"authorized_officer_name": "सुरेश कुमार श्रेष्ठ",
+	}
+
+	// Load the HTML template
+	templateBytes, err := os.ReadFile(filepath.Join("examples", "html_invoice", "passport_sifarish_patra.html"))
+	if err != nil {
+		templateBytes, err = os.ReadFile("passport_sifarish_patra.html")
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading passport_sifarish_patra.html: %v\n", err)
+		return
+	}
+
+	// Render the template with data
+	renderedHTML, err := template.RenderHTML(string(templateBytes), passportData)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error rendering passport sifarish template: %v\n", err)
+		return
+	}
+
+	devanagariFace, err := loadTrueTypeFace(
+		filepath.Join("examples", "html_invoice", "devanagari", "Lohit-Devanagari.ttf"),
+		"./devanagari/Lohit-Devanagari.ttf",
+	)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading Devanagari font: %v\n", err)
+		return
+	}
+
+	opt := html.Options{
+		DefaultFontSize:   10,
+		DefaultFontFamily: "Lohit Devanagari",
+		PageSize:          [2]float64{595.28, 841.89}, // A4
+		Margins:           [4]float64{0, 0, 0, 0},
+		FontFaces: map[string]pdffont.Face{
+			"Lohit Devanagari":      devanagariFace,
+			"Noto Sans Devanagari":  devanagariFace,
+			"Noto Serif Devanagari": devanagariFace,
+			"Mangal":                devanagariFace,
+		},
+	}
+
+	if err = pdf.FromHTML(renderedHTML, "passport_sifarish_patra.pdf", opt); err != nil {
+		fmt.Fprintf(os.Stderr, "Error generating passport sifarish PDF: %v\n", err)
+		return
+	}
+	fmt.Println("Generated passport_sifarish_patra.pdf")
 }
 
 // ---------------------------------------------------------------------------
@@ -308,4 +412,14 @@ func websiteHref(site string) string {
 		return site
 	}
 	return "https://" + site
+}
+
+func loadTrueTypeFace(paths ...string) (pdffont.Face, error) {
+	for _, path := range paths {
+		face, err := pdffont.LoadTrueTypeFile(path)
+		if err == nil {
+			return face, nil
+		}
+	}
+	return nil, fmt.Errorf("no usable TrueType font found in %v", paths)
 }

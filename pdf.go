@@ -44,8 +44,8 @@ func Quick(text string, outputPath string) error {
 	for _, pr := range pages {
 		p := document.NewPage(document.PageSize{Width: pr.Width, Height: pr.Height})
 		p.Contents = pr.Content
-		for name, fe := range pr.Fonts {
-			p.Fonts[name] = fe.ObjectNum
+		for _, fe := range pr.Fonts {
+			p.FontEntries[fe.PDFName] = fe
 		}
 		for name, ie := range pr.Images {
 			p.Images[name] = ie
@@ -107,8 +107,8 @@ func FromHTML(htmlContent string, outputPath string, opts ...html.Options) error
 	for _, pr := range pages {
 		p := document.NewPage(document.PageSize{Width: pr.Width, Height: pr.Height})
 		p.Contents = pr.Content
-		for name, fe := range pr.Fonts {
-			p.Fonts[name] = fe.ObjectNum
+		for _, fe := range pr.Fonts {
+			p.FontEntries[fe.PDFName] = fe
 		}
 		for name, ie := range pr.Images {
 			p.Images[name] = ie
@@ -201,8 +201,8 @@ func FromHTMLStreaming(htmlContent string, out io.Writer, opts ...html.Options) 
 	for _, pr := range pages {
 		p := document.NewPage(document.PageSize{Width: pr.Width, Height: pr.Height})
 		p.Contents = pr.Content
-		for name, fe := range pr.Fonts {
-			p.Fonts[name] = fe.ObjectNum
+		for _, fe := range pr.Fonts {
+			p.FontEntries[fe.PDFName] = fe
 		}
 		for name, ie := range pr.Images {
 			p.Images[name] = ie

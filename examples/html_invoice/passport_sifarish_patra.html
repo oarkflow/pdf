@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="ne">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>पासपोर्ट सिफारिस पत्र</title>
+<style>
+  @page {
+    size: A4 portrait;
+    margin: 0;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    width: 100%;
+    background: #ffffff;
+  }
+
+  body {
+    font-family: 'Lohit Devanagari', 'Noto Sans Devanagari', 'Mangal', sans-serif;
+    padding: 0;
+  }
+
+  .page {
+    background: #fefcf8;
+    width: 100%;
+    padding: 18mm 20mm 18mm 20mm;
+    position: relative;
+    border-top: 6px solid #1a3a6b;
+  }
+
+  .content { position: relative; z-index: 1; }
+
+  .letterhead {
+    text-align: center;
+    padding-bottom: 12px;
+    border-bottom: 2.5px double #1a3a6b;
+    margin-bottom: 14px;
+  }
+
+  .gov-label {
+    font-size: 13px;
+    letter-spacing: 3px;
+    color: #555;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+
+  .municipality-name {
+    font-family: 'Lohit Devanagari', 'Noto Serif Devanagari', serif;
+    font-size: 26px;
+    font-weight: 700;
+    color: #1a3a6b;
+    line-height: 1.2;
+  }
+
+  .ward-name {
+    font-size: 16px;
+    font-weight: 600;
+    color: #2c5282;
+    margin-top: 3px;
+  }
+
+  .address-line {
+    font-size: 12.5px;
+    color: #555;
+    margin-top: 4px;
+  }
+
+  .contact-line {
+    font-size: 11.5px;
+    color: #666;
+    margin-top: 2px;
+  }
+
+  .meta-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12.5px;
+    margin: 12px 0 8px 0;
+    color: #333;
+  }
+
+  .subject {
+    text-align: center;
+    font-size: 15px;
+    font-weight: 700;
+    color: #1a3a6b;
+    text-decoration: underline;
+    text-decoration-color: #1a3a6b;
+    text-underline-offset: 4px;
+    margin: 14px 0 14px 0;
+    letter-spacing: 0.5px;
+  }
+
+  .addressee {
+    font-size: 13px;
+    line-height: 1.8;
+    margin-bottom: 14px;
+    color: #222;
+  }
+
+  .addressee .label { font-weight: 700; }
+
+  .body-text {
+    font-size: 13px;
+    line-height: 2;
+    text-align: justify;
+    text-indent: 36px;
+    color: #1a1a1a;
+    margin-bottom: 14px;
+  }
+
+  .details-heading {
+    font-size: 13px;
+    font-weight: 700;
+    color: #1a3a6b;
+    border-left: 4px solid #1a3a6b;
+    padding-left: 8px;
+    margin: 14px 0 8px 0;
+  }
+
+  .details-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12.5px;
+    margin-bottom: 16px;
+  }
+
+  .details-table tr:nth-child(even) td {
+    background: #f0f4fa;
+  }
+
+  .details-table td {
+    padding: 5px 10px;
+    vertical-align: top;
+    color: #222;
+    border: 1px solid #dce4f0;
+  }
+
+  .details-table td:first-child {
+    font-weight: 600;
+    width: 42%;
+    color: #1a3a6b;
+    white-space: nowrap;
+  }
+
+  .details-table td:last-child {
+    color: #333;
+  }
+
+  .ph {
+    color: #b45309;
+    font-style: normal;
+    background: #fef3c7;
+    border-radius: 2px;
+    padding: 0 3px;
+    font-size: 11px;
+    border-bottom: 1px dashed #d97706;
+  }
+
+  .verification {
+    font-size: 12.5px;
+    line-height: 2;
+    text-align: justify;
+    text-indent: 36px;
+    color: #1a1a1a;
+    margin-bottom: 10px;
+  }
+
+  .signature-section {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-top: 36px;
+    gap: 20px;
+  }
+
+  .sig-block {
+    font-size: 12.5px;
+    line-height: 1.9;
+    color: #222;
+    flex: 1;
+  }
+
+  .sig-block .sig-name {
+    font-weight: 700;
+    font-size: 13.5px;
+    margin-top: 8px;
+    color: #1a3a6b;
+  }
+
+  .sig-line {
+    border-top: 1.5px solid #1a3a6b;
+    width: 180px;
+    margin: 40px 0 6px 0;
+  }
+
+  .seal-box {
+    width: 120px;
+    height: 120px;
+    border: 2px dashed #1a3a6b;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    font-size: 11px;
+    color: #1a3a6b;
+    flex-shrink: 0;
+    opacity: 0.6;
+    padding: 10px;
+    line-height: 1.5;
+  }
+
+  .footer {
+    border-top: 1.5px solid #1a3a6b;
+    margin-top: 22px;
+    padding-top: 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .footer-validity {
+    font-size: 11px;
+    color: #555;
+    font-style: italic;
+    line-height: 1.6;
+  }
+
+  .validity-badge {
+    background: #1a3a6b;
+    color: #fff;
+    font-size: 11px;
+    padding: 4px 10px;
+    border-radius: 3px;
+    white-space: nowrap;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+  }
+
+  @media print {
+    body { background: white; padding: 0; }
+    .page {
+      width: 100%;
+      padding: 15mm 20mm;
+      border-top: 5px solid #1a3a6b;
+    }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="content">
+
+    <!-- LETTERHEAD -->
+    <div class="letterhead">
+      <div class="gov-label">नेपाल सरकार / Government of Nepal</div>
+      <div class="municipality-name">{{municipality_name}}</div>
+      <div class="ward-name">वार्ड कार्यालय - वार्ड नं. {{ward_number}}</div>
+      <div class="address-line">{{district}} जिल्ला, {{province}}, नेपाल</div>
+      <div class="contact-line">
+        दूरभाष: {{office_phone}} / इमेल: {{office_email}}
+      </div>
+    </div>
+
+    <!-- META ROW -->
+    <div class="meta-row">
+      <span>पत्र संख्या: <strong>वा.का./पा.सि./{{letter_serial_no}}/{{fiscal_year}}</strong></span>
+      <span>मिति: <strong>{{date_bs}}</strong> &nbsp;({{date_ad}})</span>
+    </div>
+
+    <!-- SUBJECT -->
+    <div class="subject">
+      विषय: राहदानी (पासपोर्ट) जारी गर्ने सिफारिस सम्बन्धमा ।
+    </div>
+
+    <!-- ADDRESSEE -->
+    <div class="addressee">
+      <span class="label">श्रीमान् महानिर्देशकज्यू,</span><br>
+      राहदानी विभाग,<br>
+      त्रिपुरेश्वर, काठमाडौं, नेपाल ।
+    </div>
+
+    <!-- INTRO BODY -->
+    <p class="body-text">
+      उपरोक्त विषयमा यस वार्ड कार्यालयमा दर्ता भएको निम्न उल्लेखित व्यक्तिको व्यक्तिगत विवरण र आवश्यक कागजातहरू जाँचबुझ गरी सत्य तथा ठीक पाइएकोले उक्त व्यक्तिलाई राहदानी (पासपोर्ट) जारी गरिदिनुहुन यस कार्यालयबाट सिफारिस गरिन्छ:
+    </p>
+
+    <!-- DETAILS TABLE -->
+    <div class="details-heading">आवेदकको व्यक्तिगत विवरण</div>
+    <table class="details-table">
+      <tr>
+        <td>आवेदकको पूरा नाम (देवनागरी)</td>
+        <td><span class="ph">{{applicant_full_name_nepali}}</span></td>
+      </tr>
+      <tr>
+        <td>आवेदकको पूरा नाम (अंग्रेजीमा)</td>
+        <td><span class="ph">{{applicant_full_name_english}}</span></td>
+      </tr>
+      <tr>
+        <td>जन्म मिति</td>
+        <td><span class="ph">{{dob_bs}}</span> &nbsp;(<span class="ph">{{dob_ad}}</span>)</td>
+      </tr>
+      <tr>
+        <td>जन्म स्थान</td>
+        <td><span class="ph">{{birth_place}}</span></td>
+      </tr>
+      <tr>
+        <td>लिङ्ग</td>
+        <td><span class="ph">{{gender}}</span></td>
+      </tr>
+      <tr>
+        <td>नागरिकता प्रमाणपत्र नम्बर</td>
+        <td><span class="ph">{{citizenship_no}}</span></td>
+      </tr>
+      <tr>
+        <td>नागरिकता जारी जिल्ला</td>
+        <td><span class="ph">{{citizenship_issued_district}}</span></td>
+      </tr>
+      <tr>
+        <td>नागरिकता जारी मिति</td>
+        <td><span class="ph">{{citizenship_issued_date}}</span></td>
+      </tr>
+      <tr>
+        <td>बाबुको नाम</td>
+        <td><span class="ph">{{father_name}}</span></td>
+      </tr>
+      <tr>
+        <td>आमाको नाम</td>
+        <td><span class="ph">{{mother_name}}</span></td>
+      </tr>
+      <tr>
+        <td>हजुरबाबुको नाम</td>
+        <td><span class="ph">{{grandfather_name}}</span></td>
+      </tr>
+      <tr>
+        <td>पति / पत्नीको नाम (लागू भएमा)</td>
+        <td><span class="ph">{{spouse_name}}</span></td>
+      </tr>
+      <tr>
+        <td>स्थायी ठेगाना</td>
+        <td>
+          वार्ड नं. <span class="ph">{{permanent_ward_no}}</span>,
+          <span class="ph">{{permanent_municipality}}</span>,
+          <span class="ph">{{permanent_district}}</span> जिल्ला, नेपाल
+        </td>
+      </tr>
+      <tr>
+        <td>हालको बसोबास ठेगाना</td>
+        <td>
+          वार्ड नं. <span class="ph">{{current_ward_no}}</span>,
+          <span class="ph">{{current_municipality}}</span>,
+          <span class="ph">{{current_district}}</span> जिल्ला, नेपाल
+        </td>
+      </tr>
+      <tr>
+        <td>सम्पर्क फोन नम्बर</td>
+        <td><span class="ph">{{applicant_phone}}</span></td>
+      </tr>
+      <tr>
+        <td>राहदानीको प्रकार</td>
+        <td><span class="ph">{{passport_type}}</span></td>
+      </tr>
+    </table>
+
+    <!-- VERIFICATION -->
+    <p class="verification">
+      यस कार्यालयले उपर्युक्त व्यक्तिको नागरिकता प्रमाणपत्र, जन्मदर्ता प्रमाणपत्र, सम्बन्धित कागजातहरू र स्थानीय अभिलेखको आधारमा जाँचबुझ गर्दा उल्लिखित व्यक्तिगत विवरणहरू सत्य, शुद्ध र प्रमाणित भएको पाइएको छ।
+    </p>
+    <p class="verification">
+      उक्त व्यक्ति हाल यस वार्डको स्थायी बासिन्दा हुनुहुन्छ र निजको चरित्र तथा आचरण राम्रो रहेको व्यहोरा समेत यसै पत्रद्वारा प्रमाणित गरिन्छ। अतः माथि उल्लेखित व्यक्तिलाई नेपाल सरकारको प्रचलित नियम कानुन बमोजिम राहदानी जारी गरिदिनुहुन अनुरोध गर्दछौं।
+    </p>
+
+    <!-- SIGNATURE SECTION -->
+    <div class="signature-section">
+      <div class="sig-block">
+        <div>सदर गर्ने अधिकारीको,</div>
+        <div class="sig-line"></div>
+        <div class="sig-name"><span class="ph">{{authorized_officer_name}}</span></div>
+        <div>वार्ड अध्यक्ष / सचिव</div>
+        <div>वार्ड नं. <span class="ph">{{ward_number}}</span>, <span class="ph">{{municipality_name}}</span></div>
+        <div><span class="ph">{{district}}</span> जिल्ला, नेपाल</div>
+        <div>सम्पर्क: <span class="ph">{{office_phone}}</span></div>
+      </div>
+    </div>
+
+    <!-- FOOTER -->
+    <div class="footer">
+      <div class="footer-validity">
+        यो पत्र जारी भएको मितिले <strong>३५ दिन</strong>सम्म मात्र मान्य हुनेछ ।<br>
+        <em>This letter is valid for 35 days from the date of issue.</em>
+      </div>
+      <div class="validity-badge">मान्यता: ३५ दिन</div>
+    </div>
+
+  </div>
+</div>
+</body>
+</html>

@@ -9,6 +9,7 @@ import (
 
 	"github.com/oarkflow/fasttpl"
 	"github.com/oarkflow/pdf/core"
+	pdffont "github.com/oarkflow/pdf/font"
 	"github.com/oarkflow/pdf/layout"
 	"github.com/oarkflow/pdf/tailwind"
 )
@@ -51,6 +52,7 @@ type Options struct {
 	EnableJavaScript  bool
 	UseTailwind       bool
 	Encryption        *core.EncryptionConfig
+	FontFaces         map[string]pdffont.Face
 	// TemplateData, when non-nil, causes the HTML to be processed as a fasttpl
 	// template before parsing. Supports {{ if }}, {{ range }}, {{ filters }},
 	// nested keys like {{ user.name }}, etc.
@@ -1106,6 +1108,7 @@ func (c *converter) collectTextRunsRecursive(node *Node, runs *[]layout.TextRun,
 			Text:      text,
 			FontName:  style.FontFamily,
 			FontSize:  style.FontSize,
+			FontFace:  resolveFontFaceWithFallback(style.FontFamily, c.opts.FontFaces, text),
 			Bold:      style.FontWeight >= 600,
 			Italic:    style.FontStyle == "italic" || style.FontStyle == "oblique",
 			Color:     style.Color,
@@ -1179,6 +1182,7 @@ func (c *converter) textRunsFromText(node *Node) []layout.TextRun {
 		Text:     text,
 		FontName: style.FontFamily,
 		FontSize: style.FontSize,
+		FontFace: resolveFontFaceWithFallback(style.FontFamily, c.opts.FontFaces, text),
 		Bold:     style.FontWeight >= 700,
 		Italic:   style.FontStyle == "italic",
 		Color:    style.Color,
