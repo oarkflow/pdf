@@ -1,34 +1,50 @@
 package font
 
 import (
+	"encoding/binary"
 	"fmt"
 	"strings"
+	"unicode/utf16"
 
 	"github.com/oarkflow/pdf/core"
 )
 
 // EmbeddedFont tracks glyph usage and produces PDF font objects.
 type EmbeddedFont struct {
-	Face        Face
-	PDFName     string
-	usedGlyphs map[uint16]rune
-	usedRunes   map[rune]uint16
+	Face       Face
+	PDFName    string
+	usedGlyphs map[uint16]glyphUse
+	usedRunes  map[rune]uint16
+	usedShaped map[shapedGlyphKey]uint16
+	nextCID    uint16
+}
+
+type glyphUse struct {
+	GID     uint16
+	Unicode string
+}
+
+type shapedGlyphKey struct {
+	GID     uint16
+	Unicode string
 }
 
 // NewEmbeddedFont creates a new EmbeddedFont wrapper.
 func NewEmbeddedFont(face Face, pdfName string) *EmbeddedFont {
 	return &EmbeddedFont{
-		Face:        face,
-		PDFName:     pdfName,
-		usedGlyphs:  make(map[uint16]rune),
-		usedRunes:   make(map[rune]uint16),
+		Face:       face,
+		PDFName:    pdfName,
+		usedGlyphs: make(map[uint16]glyphUse),
+		usedRunes:  make(map[rune]uint16),
+		usedShaped: make(map[shapedGlyphKey]uint16),
+		nextCID:    1,
 	}
 }
 
 // AddRune records a rune as used and returns its glyph ID.
 func (ef *EmbeddedFont) AddRune(r rune) uint16 {
-	if gid, ok := ef.usedRunes[r]; ok {
-		return gid
+	if cid, ok := ef.usedRunes[r]; ok {
+		return cid
 	}
 	gid := ef.Face.GlyphIndex(r)
 	// If glyph is missing (0), try common substitutions.
@@ -40,20 +56,39 @@ func (ef *EmbeddedFont) AddRune(r rune) uint16 {
 			}
 		}
 	}
-	ef.usedGlyphs[gid] = r
-	ef.usedRunes[r] = gid
-	return gid
+	cid := ef.addGlyph(gid, string(r))
+	ef.usedRunes[r] = cid
+	return cid
+}
+
+// AddGlyph records a shaped glyph ID and maps it to the supplied Unicode
+// cluster for ToUnicode extraction.
+func (ef *EmbeddedFont) AddGlyph(gid uint16, unicode string) uint16 {
+	key := shapedGlyphKey{GID: gid, Unicode: unicode}
+	if cid, ok := ef.usedShaped[key]; ok {
+		return cid
+	}
+	cid := ef.addGlyph(gid, unicode)
+	ef.usedShaped[key] = cid
+	return cid
+}
+
+func (ef *EmbeddedFont) addGlyph(gid uint16, unicode string) uint16 {
+	cid := ef.nextCID
+	ef.nextCID++
+	ef.usedGlyphs[cid] = glyphUse{GID: gid, Unicode: unicode}
+	return cid
 }
 
 // glyphSubstitutions maps characters to fallback alternatives when the
 // primary glyph is missing from a font.
 var glyphSubstitutions = map[rune]rune{
-	'\u00A0': ' ',  // NBSP → regular space
-	'\u2002': ' ',  // EN SPACE → regular space
-	'\u2003': ' ',  // EM SPACE → regular space
-	'\u2009': ' ',  // THIN SPACE → regular space
-	'\u200A': ' ',  // HAIR SPACE → regular space
-	'\u202F': ' ',  // NARROW NO-BREAK SPACE → regular space
+	'\u00A0': ' ', // NBSP → regular space
+	'\u2002': ' ', // EN SPACE → regular space
+	'\u2003': ' ', // EM SPACE → regular space
+	'\u2009': ' ', // THIN SPACE → regular space
+	'\u200A': ' ', // HAIR SPACE → regular space
+	'\u202F': ' ', // NARROW NO-BREAK SPACE → regular space
 }
 
 // AddString records all runes in s as used.
@@ -64,7 +99,7 @@ func (ef *EmbeddedFont) AddString(s string) {
 }
 
 // UsedGlyphs returns the glyph-to-rune mapping.
-func (ef *EmbeddedFont) UsedGlyphs() map[uint16]rune {
+func (ef *EmbeddedFont) UsedGlyphs() map[uint16]glyphUse {
 	return ef.usedGlyphs
 }
 
@@ -86,10 +121,16 @@ func (ef *EmbeddedFont) EncodedString(s string) string {
 	}
 	var buf []byte
 	for _, r := range s {
-		gid := ef.AddRune(r)
-		buf = append(buf, byte(gid>>8), byte(gid))
+		cid := ef.AddRune(r)
+		buf = append(buf, byte(cid>>8), byte(cid))
 	}
 	return string(buf)
+}
+
+// EncodedGlyph returns the encoded CID bytes for a shaped glyph.
+func (ef *EmbeddedFont) EncodedGlyph(gid uint16, unicode string) string {
+	cid := ef.AddGlyph(gid, unicode)
+	return string([]byte{byte(cid >> 8), byte(cid)})
 }
 
 // BuildObjects returns the PDF indirect objects needed for this font.
@@ -155,6 +196,15 @@ func (ef *EmbeddedFont) buildCIDFontObjects(nextObjNum func() int) []core.PdfInd
 	}
 	objects = append(objects, descObj)
 
+	// CID-to-GID map stream.
+	cidMapNum := nextObjNum()
+	cidMapStream := core.NewStream(ef.CIDToGIDMap())
+	cidMapObj := core.PdfIndirectObject{
+		Reference: core.PdfIndirectReference{ObjectNumber: cidMapNum},
+		Object:    cidMapStream,
+	}
+	objects = append(objects, cidMapObj)
+
 	// CIDFont dict.
 	cidNum := nextObjNum()
 	cidSysInfo := core.NewDictionary()
@@ -170,7 +220,7 @@ func (ef *EmbeddedFont) buildCIDFontObjects(nextObjNum func() int) []core.PdfInd
 	cidDict.Set("FontDescriptor", core.PdfIndirectReference{ObjectNumber: descNum})
 	cidDict.Set("DW", core.PdfInteger(1000))
 	cidDict.Set("W", ef.buildWidthArray())
-	cidDict.Set("CIDToGIDMap", core.PdfName("Identity"))
+	cidDict.Set("CIDToGIDMap", core.PdfIndirectReference{ObjectNumber: cidMapNum})
 
 	cidObj := core.PdfIndirectObject{
 		Reference: core.PdfIndirectReference{ObjectNumber: cidNum},
@@ -212,7 +262,7 @@ func (ef *EmbeddedFont) buildWidthArray() core.PdfArray {
 	upem := ef.Face.UnitsPerEm()
 	var arr core.PdfArray
 	for gid := range ef.usedGlyphs {
-		adv := ef.Face.GlyphAdvance(gid)
+		adv := ef.Face.GlyphAdvance(ef.usedGlyphs[gid].GID)
 		w := adv
 		if upem != 1000 && upem != 0 {
 			w = adv * 1000 / upem
@@ -220,6 +270,21 @@ func (ef *EmbeddedFont) buildWidthArray() core.PdfArray {
 		arr = append(arr, core.PdfInteger(gid), core.PdfArray{core.PdfInteger(w)})
 	}
 	return arr
+}
+
+// CIDToGIDMap builds the binary map used by CIDFontType2 fonts.
+func (ef *EmbeddedFont) CIDToGIDMap() []byte {
+	maxCID := 0
+	for cid := range ef.usedGlyphs {
+		if int(cid) > maxCID {
+			maxCID = int(cid)
+		}
+	}
+	data := make([]byte, (maxCID+1)*2)
+	for cid, use := range ef.usedGlyphs {
+		binary.BigEndian.PutUint16(data[int(cid)*2:], use.GID)
+	}
+	return data
 }
 
 // ToUnicodeCMap generates a CMap for text extraction from the PDF.
@@ -236,12 +301,20 @@ func (ef *EmbeddedFont) ToUnicodeCMap() []byte {
 	n := len(ef.usedGlyphs)
 	if n > 0 {
 		b.WriteString(fmt.Sprintf("%d beginbfchar\n", n))
-		for gid, r := range ef.usedGlyphs {
-			b.WriteString(fmt.Sprintf("<%04X> <%04X>\n", gid, r))
+		for cid, use := range ef.usedGlyphs {
+			b.WriteString(fmt.Sprintf("<%04X> <%s>\n", cid, utf16Hex(use.Unicode)))
 		}
 		b.WriteString("endbfchar\n")
 	}
 
 	b.WriteString("endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n")
 	return []byte(b.String())
+}
+
+func utf16Hex(s string) string {
+	var b strings.Builder
+	for _, u := range utf16.Encode([]rune(s)) {
+		b.WriteString(fmt.Sprintf("%04X", u))
+	}
+	return b.String()
 }

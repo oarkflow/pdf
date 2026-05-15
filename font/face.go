@@ -18,11 +18,27 @@ type Face interface {
 	NumGlyphs() int
 }
 
+// ShapedGlyph is a positioned glyph produced by an OpenType shaper.
+// Position and advance values are in font units.
+type ShapedGlyph struct {
+	GlyphID  uint16
+	Cluster  string
+	XAdvance int
+	YAdvance int
+	XOffset  int
+	YOffset  int
+}
+
+// Shaper is implemented by font faces that can perform OpenType shaping.
+type Shaper interface {
+	ShapeText(text string) ([]ShapedGlyph, bool)
+}
+
 // Style represents a font style variant.
 type Style int
 
 const (
-	StyleRegular   Style = iota
+	StyleRegular Style = iota
 	StyleBold
 	StyleItalic
 	StyleBoldItalic

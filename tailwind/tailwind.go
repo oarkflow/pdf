@@ -489,14 +489,14 @@ func (p *Parser) parseLayout(class string) map[string]any {
 
 	// Break
 	breakBefore := map[string]string{
-		"break-before-auto":         "auto",
-		"break-before-avoid":        "avoid",
-		"break-before-all":          "all",
-		"break-before-avoid-page":   "avoid-page",
-		"break-before-page":         "page",
-		"break-before-left":         "left",
-		"break-before-right":        "right",
-		"break-before-column":       "column",
+		"break-before-auto":       "auto",
+		"break-before-avoid":      "avoid",
+		"break-before-all":        "all",
+		"break-before-avoid-page": "avoid-page",
+		"break-before-page":       "page",
+		"break-before-left":       "left",
+		"break-before-right":      "right",
+		"break-before-column":     "column",
 	}
 	if v, ok := breakBefore[class]; ok {
 		return map[string]any{"break-before": v}
@@ -615,11 +615,11 @@ func (p *Parser) parsePosition(class string) map[string]any {
 
 func (p *Parser) parseOverflow(class string) map[string]any {
 	overflowMap := map[string]string{
-		"overflow-auto":    "auto",
-		"overflow-hidden":  "hidden",
-		"overflow-clip":    "clip",
-		"overflow-visible": "visible",
-		"overflow-scroll":  "scroll",
+		"overflow-auto":      "auto",
+		"overflow-hidden":    "hidden",
+		"overflow-clip":      "clip",
+		"overflow-visible":   "visible",
+		"overflow-scroll":    "scroll",
 		"overflow-x-auto":    "auto",
 		"overflow-x-hidden":  "hidden",
 		"overflow-x-clip":    "clip",
@@ -643,9 +643,9 @@ func (p *Parser) parseOverflow(class string) map[string]any {
 
 	// Overscroll
 	overscrollMap := map[string]string{
-		"overscroll-auto":     "auto",
-		"overscroll-contain":  "contain",
-		"overscroll-none":     "none",
+		"overscroll-auto":      "auto",
+		"overscroll-contain":   "contain",
+		"overscroll-none":      "none",
 		"overscroll-x-auto":    "auto",
 		"overscroll-x-contain": "contain",
 		"overscroll-x-none":    "none",
@@ -727,10 +727,10 @@ func (p *Parser) parseFlexbox(class string) map[string]any {
 
 	// Flex shorthand
 	flexShort := map[string]string{
-		"flex-1":    "1 1 0%",
-		"flex-auto": "1 1 auto",
+		"flex-1":       "1 1 0%",
+		"flex-auto":    "1 1 auto",
 		"flex-initial": "0 1 auto",
-		"flex-none": "none",
+		"flex-none":    "none",
 	}
 	if v, ok := flexShort[class]; ok {
 		return map[string]any{"flex": v}
@@ -768,14 +768,14 @@ func (p *Parser) parseFlexbox(class string) map[string]any {
 
 	// Justify content
 	justifyContent := map[string]string{
-		"justify-normal":        "normal",
-		"justify-start":         "flex-start",
-		"justify-end":           "flex-end",
-		"justify-center":        "center",
-		"justify-between":       "space-between",
-		"justify-around":        "space-around",
-		"justify-evenly":        "space-evenly",
-		"justify-stretch":       "stretch",
+		"justify-normal":  "normal",
+		"justify-start":   "flex-start",
+		"justify-end":     "flex-end",
+		"justify-center":  "center",
+		"justify-between": "space-between",
+		"justify-around":  "space-around",
+		"justify-evenly":  "space-evenly",
+		"justify-stretch": "stretch",
 	}
 	if v, ok := justifyContent[class]; ok {
 		return map[string]any{"justify-content": v}
@@ -806,15 +806,15 @@ func (p *Parser) parseFlexbox(class string) map[string]any {
 
 	// Align content
 	alignContent := map[string]string{
-		"content-normal":  "normal",
-		"content-center":  "center",
-		"content-start":   "flex-start",
-		"content-end":     "flex-end",
-		"content-between": "space-between",
-		"content-around":  "space-around",
-		"content-evenly":  "space-evenly",
+		"content-normal":   "normal",
+		"content-center":   "center",
+		"content-start":    "flex-start",
+		"content-end":      "flex-end",
+		"content-between":  "space-between",
+		"content-around":   "space-around",
+		"content-evenly":   "space-evenly",
 		"content-baseline": "baseline",
-		"content-stretch": "stretch",
+		"content-stretch":  "stretch",
 	}
 	if v, ok := alignContent[class]; ok {
 		return map[string]any{"align-content": v}
@@ -847,14 +847,14 @@ func (p *Parser) parseFlexbox(class string) map[string]any {
 
 	// Place content
 	placeContent := map[string]string{
-		"place-content-center":  "center",
-		"place-content-start":   "start",
-		"place-content-end":     "end",
-		"place-content-between": "space-between",
-		"place-content-around":  "space-around",
-		"place-content-evenly":  "space-evenly",
+		"place-content-center":   "center",
+		"place-content-start":    "start",
+		"place-content-end":      "end",
+		"place-content-between":  "space-between",
+		"place-content-around":   "space-around",
+		"place-content-evenly":   "space-evenly",
 		"place-content-baseline": "baseline",
-		"place-content-stretch": "stretch",
+		"place-content-stretch":  "stretch",
 	}
 	if v, ok := placeContent[class]; ok {
 		return map[string]any{"place-content": v}
@@ -862,11 +862,11 @@ func (p *Parser) parseFlexbox(class string) map[string]any {
 
 	// Place items
 	placeItems := map[string]string{
-		"place-items-start":   "start",
-		"place-items-end":     "end",
-		"place-items-center":  "center",
+		"place-items-start":    "start",
+		"place-items-end":      "end",
+		"place-items-center":   "center",
 		"place-items-baseline": "baseline",
-		"place-items-stretch": "stretch",
+		"place-items-stretch":  "stretch",
 	}
 	if v, ok := placeItems[class]; ok {
 		return map[string]any{"place-items": v}
@@ -895,19 +895,19 @@ func (p *Parser) parseGrid(class string) map[string]any {
 	// Grid template columns
 	if rest, ok := stripPrefix(class, "grid-cols-"); ok {
 		cols := map[string]string{
-			"1": "repeat(1, minmax(0, 1fr))",
-			"2": "repeat(2, minmax(0, 1fr))",
-			"3": "repeat(3, minmax(0, 1fr))",
-			"4": "repeat(4, minmax(0, 1fr))",
-			"5": "repeat(5, minmax(0, 1fr))",
-			"6": "repeat(6, minmax(0, 1fr))",
-			"7": "repeat(7, minmax(0, 1fr))",
-			"8": "repeat(8, minmax(0, 1fr))",
-			"9": "repeat(9, minmax(0, 1fr))",
-			"10": "repeat(10, minmax(0, 1fr))",
-			"11": "repeat(11, minmax(0, 1fr))",
-			"12": "repeat(12, minmax(0, 1fr))",
-			"none": "none",
+			"1":       "repeat(1, minmax(0, 1fr))",
+			"2":       "repeat(2, minmax(0, 1fr))",
+			"3":       "repeat(3, minmax(0, 1fr))",
+			"4":       "repeat(4, minmax(0, 1fr))",
+			"5":       "repeat(5, minmax(0, 1fr))",
+			"6":       "repeat(6, minmax(0, 1fr))",
+			"7":       "repeat(7, minmax(0, 1fr))",
+			"8":       "repeat(8, minmax(0, 1fr))",
+			"9":       "repeat(9, minmax(0, 1fr))",
+			"10":      "repeat(10, minmax(0, 1fr))",
+			"11":      "repeat(11, minmax(0, 1fr))",
+			"12":      "repeat(12, minmax(0, 1fr))",
+			"none":    "none",
 			"subgrid": "subgrid",
 		}
 		if v, ok2 := cols[rest]; ok2 {
@@ -988,11 +988,11 @@ func (p *Parser) parseGrid(class string) map[string]any {
 
 	// Grid auto flow
 	gridAutoFlow := map[string]string{
-		"grid-flow-row":         "row",
-		"grid-flow-col":         "column",
-		"grid-flow-dense":       "dense",
-		"grid-flow-row-dense":   "row dense",
-		"grid-flow-col-dense":   "column dense",
+		"grid-flow-row":       "row",
+		"grid-flow-col":       "column",
+		"grid-flow-dense":     "dense",
+		"grid-flow-row-dense": "row dense",
+		"grid-flow-col-dense": "column dense",
 	}
 	if v, ok := gridAutoFlow[class]; ok {
 		return map[string]any{"grid-auto-flow": v}
@@ -1182,13 +1182,13 @@ func (p *Parser) parseSizing(class string) map[string]any {
 
 	extraW := map[string]string{
 		"screen": "100vw", "svw": "100svw", "lvw": "100lvw", "dvw": "100dvw",
-		"min":    "min-content", "max": "max-content", "fit": "fit-content",
-		"auto":   "auto",
+		"min": "min-content", "max": "max-content", "fit": "fit-content",
+		"auto": "auto",
 	}
 	extraH := map[string]string{
 		"screen": "100vh", "svh": "100svh", "lvh": "100lvh", "dvh": "100dvh",
-		"min":    "min-content", "max": "max-content", "fit": "fit-content",
-		"auto":   "auto",
+		"min": "min-content", "max": "max-content", "fit": "fit-content",
+		"auto": "auto",
 	}
 
 	// Named max-width sizes
@@ -1352,11 +1352,11 @@ func (p *Parser) parseTypography(class string) map[string]any {
 
 	// Font variant numeric
 	numericVariants := map[string]string{
-		"normal-nums":        "normal", "ordinal": "ordinal",
-		"slashed-zero":       "slashed-zero", "lining-nums": "lining-nums",
-		"oldstyle-nums":      "oldstyle-nums", "proportional-nums": "proportional-nums",
-		"tabular-nums":       "tabular-nums", "diagonal-fractions": "diagonal-fractions",
-		"stacked-fractions":  "stacked-fractions",
+		"normal-nums": "normal", "ordinal": "ordinal",
+		"slashed-zero": "slashed-zero", "lining-nums": "lining-nums",
+		"oldstyle-nums": "oldstyle-nums", "proportional-nums": "proportional-nums",
+		"tabular-nums": "tabular-nums", "diagonal-fractions": "diagonal-fractions",
+		"stacked-fractions": "stacked-fractions",
 	}
 	if v, ok := numericVariants[class]; ok {
 		return map[string]any{"font-variant-numeric": v}
@@ -1394,10 +1394,10 @@ func (p *Parser) parseTypography(class string) map[string]any {
 
 	// Decoration
 	decorationClasses := map[string]map[string]any{
-		"underline":       {"text-decoration-line": "underline"},
-		"overline":        {"text-decoration-line": "overline"},
-		"line-through":    {"text-decoration-line": "line-through"},
-		"no-underline":    {"text-decoration-line": "none"},
+		"underline":    {"text-decoration-line": "underline"},
+		"overline":     {"text-decoration-line": "overline"},
+		"line-through": {"text-decoration-line": "line-through"},
+		"no-underline": {"text-decoration-line": "none"},
 	}
 	if v, ok := decorationClasses[class]; ok {
 		return v
@@ -1471,13 +1471,13 @@ func (p *Parser) parseTypography(class string) map[string]any {
 	// Antialiased
 	if class == "antialiased" {
 		return map[string]any{
-			"-webkit-font-smoothing": "antialiased",
+			"-webkit-font-smoothing":  "antialiased",
 			"-moz-osx-font-smoothing": "grayscale",
 		}
 	}
 	if class == "subpixel-antialiased" {
 		return map[string]any{
-			"-webkit-font-smoothing": "auto",
+			"-webkit-font-smoothing":  "auto",
 			"-moz-osx-font-smoothing": "auto",
 		}
 	}
@@ -1531,20 +1531,20 @@ func (p *Parser) parseTypography(class string) map[string]any {
 		if rest == "none" {
 			return map[string]any{
 				"-webkit-line-clamp": "unset",
-				"overflow":            "visible",
+				"overflow":           "visible",
 			}
 		}
 		if arb := extractArbitraryValue(rest); arb != "" {
 			return map[string]any{
-				"overflow":            "hidden",
-				"display":             "-webkit-box",
+				"overflow":           "hidden",
+				"display":            "-webkit-box",
 				"-webkit-box-orient": "vertical",
 				"-webkit-line-clamp": arb,
 			}
 		}
 		return map[string]any{
-			"overflow":            "hidden",
-			"display":             "-webkit-box",
+			"overflow":           "hidden",
+			"display":            "-webkit-box",
 			"-webkit-box-orient": "vertical",
 			"-webkit-line-clamp": rest,
 		}
@@ -1653,7 +1653,7 @@ func (p *Parser) parseBackground(class string) map[string]any {
 
 		// Gradient
 		gradients := map[string]string{
-			"none":       "none",
+			"none":           "none",
 			"gradient-to-t":  "linear-gradient(to top, var(--tw-gradient-stops))",
 			"gradient-to-tr": "linear-gradient(to top right, var(--tw-gradient-stops))",
 			"gradient-to-r":  "linear-gradient(to right, var(--tw-gradient-stops))",
@@ -1871,9 +1871,9 @@ func (p *Parser) parseBorder(class string) map[string]any {
 			w = arb
 		}
 		return map[string]any{
-			"--tw-divide-x-reverse":   "0",
-			"border-right-width": fmt.Sprintf("calc(%s * var(--tw-divide-x-reverse))", w),
-			"border-left-width":  fmt.Sprintf("calc(%s * calc(1 - var(--tw-divide-x-reverse)))", w),
+			"--tw-divide-x-reverse": "0",
+			"border-right-width":    fmt.Sprintf("calc(%s * var(--tw-divide-x-reverse))", w),
+			"border-left-width":     fmt.Sprintf("calc(%s * calc(1 - var(--tw-divide-x-reverse)))", w),
 		}
 	}
 	if rest, ok := stripPrefix(class, "divide-y-"); ok {
@@ -1887,9 +1887,9 @@ func (p *Parser) parseBorder(class string) map[string]any {
 			w = arb
 		}
 		return map[string]any{
-			"--tw-divide-y-reverse":    "0",
-			"border-bottom-width": fmt.Sprintf("calc(%s * var(--tw-divide-y-reverse))", w),
-			"border-top-width":    fmt.Sprintf("calc(%s * calc(1 - var(--tw-divide-y-reverse)))", w),
+			"--tw-divide-y-reverse": "0",
+			"border-bottom-width":   fmt.Sprintf("calc(%s * var(--tw-divide-y-reverse))", w),
+			"border-top-width":      fmt.Sprintf("calc(%s * calc(1 - var(--tw-divide-y-reverse)))", w),
 		}
 	}
 	if rest, ok := stripPrefix(class, "divide-"); ok {
@@ -1953,19 +1953,20 @@ func (p *Parser) parseOpacity(class string) map[string]any {
 func (p *Parser) parseShadow(class string) map[string]any {
 	if rest, ok := stripPrefix(class, "shadow-"); ok {
 		shadows := map[string]string{
-			"sm":  "0 1px 2px 0 rgb(0 0 0 / 0.05)",
-			"":    "0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)",
-			"md":  "0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)",
-			"lg":  "0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)",
-			"xl":  "0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)",
-			"2xl": "0 25px 50px -12px rgb(0 0 0 / 0.25)",
+			"sm":    "0 1px 2px 0 rgb(0 0 0 / 0.05)",
+			"":      "0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)",
+			"md":    "0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)",
+			"lg":    "0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)",
+			"xl":    "0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)",
+			"2xl":   "0 25px 50px -12px rgb(0 0 0 / 0.25)",
 			"inner": "inset 0 2px 4px 0 rgb(0 0 0 / 0.05)",
-			"none": "0 0 #0000",
+			"none":  "0 0 #0000",
 		}
 		if v, ok2 := shadows[rest]; ok2 {
 			return map[string]any{"box-shadow": v}
 		}
 		if arb := extractArbitraryValue(rest); arb != "" {
+			arb = strings.ReplaceAll(arb, "_", " ")
 			return map[string]any{"box-shadow": arb}
 		}
 		// Shadow color
@@ -1988,12 +1989,12 @@ func (p *Parser) parseShadow(class string) map[string]any {
 
 func (p *Parser) parseRing(class string) map[string]any {
 	ringWidths := map[string]string{
-		"ring":    "3px",
-		"ring-0":  "0px",
-		"ring-1":  "1px",
-		"ring-2":  "2px",
-		"ring-4":  "4px",
-		"ring-8":  "8px",
+		"ring":       "3px",
+		"ring-0":     "0px",
+		"ring-1":     "1px",
+		"ring-2":     "2px",
+		"ring-4":     "4px",
+		"ring-8":     "8px",
 		"ring-inset": "inset",
 	}
 	if v, ok := ringWidths[class]; ok {
@@ -2131,12 +2132,12 @@ func (p *Parser) parseFilters(class string) map[string]any {
 	// Drop shadow
 	if rest, ok := stripPrefix(class, "drop-shadow-"); ok {
 		dropShadows := map[string]string{
-			"sm":  "drop-shadow(0 1px 1px rgb(0 0 0 / 0.05))",
-			"":    "drop-shadow(0 1px 2px rgb(0 0 0 / 0.1)) drop-shadow(0 1px 1px rgb(0 0 0 / 0.06))",
-			"md":  "drop-shadow(0 4px 3px rgb(0 0 0 / 0.07)) drop-shadow(0 2px 2px rgb(0 0 0 / 0.06))",
-			"lg":  "drop-shadow(0 10px 8px rgb(0 0 0 / 0.04)) drop-shadow(0 4px 3px rgb(0 0 0 / 0.1))",
-			"xl":  "drop-shadow(0 20px 13px rgb(0 0 0 / 0.03)) drop-shadow(0 8px 5px rgb(0 0 0 / 0.08))",
-			"2xl": "drop-shadow(0 25px 25px rgb(0 0 0 / 0.15))",
+			"sm":   "drop-shadow(0 1px 1px rgb(0 0 0 / 0.05))",
+			"":     "drop-shadow(0 1px 2px rgb(0 0 0 / 0.1)) drop-shadow(0 1px 1px rgb(0 0 0 / 0.06))",
+			"md":   "drop-shadow(0 4px 3px rgb(0 0 0 / 0.07)) drop-shadow(0 2px 2px rgb(0 0 0 / 0.06))",
+			"lg":   "drop-shadow(0 10px 8px rgb(0 0 0 / 0.04)) drop-shadow(0 4px 3px rgb(0 0 0 / 0.1))",
+			"xl":   "drop-shadow(0 20px 13px rgb(0 0 0 / 0.03)) drop-shadow(0 8px 5px rgb(0 0 0 / 0.08))",
+			"2xl":  "drop-shadow(0 25px 25px rgb(0 0 0 / 0.15))",
 			"none": "drop-shadow(0 0 #0000)",
 		}
 		if v, ok2 := dropShadows[rest]; ok2 {
@@ -2298,11 +2299,11 @@ func (p *Parser) parseTransitions(class string) map[string]any {
 	// Transition property
 	if rest, ok := stripPrefix(class, "transition-"); ok {
 		transitions := map[string]string{
-			"none":    "none",
-			"all":     "all 150ms cubic-bezier(0.4,0,0.2,1)",
-			"colors":  "color, background-color, border-color, text-decoration-color, fill, stroke 150ms cubic-bezier(0.4,0,0.2,1)",
-			"opacity": "opacity 150ms cubic-bezier(0.4,0,0.2,1)",
-			"shadow":  "box-shadow 150ms cubic-bezier(0.4,0,0.2,1)",
+			"none":      "none",
+			"all":       "all 150ms cubic-bezier(0.4,0,0.2,1)",
+			"colors":    "color, background-color, border-color, text-decoration-color, fill, stroke 150ms cubic-bezier(0.4,0,0.2,1)",
+			"opacity":   "opacity 150ms cubic-bezier(0.4,0,0.2,1)",
+			"shadow":    "box-shadow 150ms cubic-bezier(0.4,0,0.2,1)",
 			"transform": "transform 150ms cubic-bezier(0.4,0,0.2,1)",
 		}
 		if v, ok2 := transitions[rest]; ok2 {
@@ -2334,10 +2335,10 @@ func (p *Parser) parseTransitions(class string) map[string]any {
 	// Timing function (ease)
 	if rest, ok := stripPrefix(class, "ease-"); ok {
 		easings := map[string]string{
-			"linear":  "linear",
-			"in":      "cubic-bezier(0.4, 0, 1, 1)",
-			"out":     "cubic-bezier(0, 0, 0.2, 1)",
-			"in-out":  "cubic-bezier(0.4, 0, 0.2, 1)",
+			"linear": "linear",
+			"in":     "cubic-bezier(0.4, 0, 1, 1)",
+			"out":    "cubic-bezier(0, 0, 0.2, 1)",
+			"in-out": "cubic-bezier(0.4, 0, 0.2, 1)",
 		}
 		if v, ok2 := easings[rest]; ok2 {
 			return map[string]any{"transition-timing-function": v}
@@ -2372,10 +2373,10 @@ func (p *Parser) parseTransitions(class string) map[string]any {
 func (p *Parser) parseAnimation(class string) map[string]any {
 	if rest, ok := stripPrefix(class, "animate-"); ok {
 		animations := map[string]map[string]any{
-			"none": {"animation": "none"},
-			"spin": {"animation": "spin 1s linear infinite"},
-			"ping": {"animation": "ping 1s cubic-bezier(0, 0, 0.2, 1) infinite"},
-			"pulse": {"animation": "pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite"},
+			"none":   {"animation": "none"},
+			"spin":   {"animation": "spin 1s linear infinite"},
+			"ping":   {"animation": "ping 1s cubic-bezier(0, 0, 0.2, 1) infinite"},
+			"pulse":  {"animation": "pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite"},
 			"bounce": {"animation": "bounce 1s infinite"},
 		}
 		if v, ok2 := animations[rest]; ok2 {
@@ -2512,15 +2513,15 @@ func (p *Parser) parseTransforms(class string) map[string]any {
 	// Transform origin
 	if rest, ok := stripPrefix(class, "origin-"); ok {
 		origins := map[string]string{
-			"center":        "center",
-			"top":           "top",
-			"top-right":     "top right",
-			"right":         "right",
-			"bottom-right":  "bottom right",
-			"bottom":        "bottom",
-			"bottom-left":   "bottom left",
-			"left":          "left",
-			"top-left":      "top left",
+			"center":       "center",
+			"top":          "top",
+			"top-right":    "top right",
+			"right":        "right",
+			"bottom-right": "bottom right",
+			"bottom":       "bottom",
+			"bottom-left":  "bottom left",
+			"left":         "left",
+			"top-left":     "top left",
 		}
 		if v, ok2 := origins[rest]; ok2 {
 			return map[string]any{"transform-origin": v}
@@ -2540,7 +2541,7 @@ func (p *Parser) parseTransforms(class string) map[string]any {
 func (p *Parser) parseInteractivity(class string) map[string]any {
 	// Scroll snap
 	snapAligns := map[string]string{
-		"snap-start":  "start", "snap-end": "end",
+		"snap-start": "start", "snap-end": "end",
 		"snap-center": "center", "snap-align-none": "none",
 	}
 	if v, ok := snapAligns[class]; ok {
@@ -2548,10 +2549,10 @@ func (p *Parser) parseInteractivity(class string) map[string]any {
 	}
 
 	snapTypes := map[string]string{
-		"snap-none":      "none",
-		"snap-x":         "x var(--tw-scroll-snap-strictness)",
-		"snap-y":         "y var(--tw-scroll-snap-strictness)",
-		"snap-both":      "both var(--tw-scroll-snap-strictness)",
+		"snap-none": "none",
+		"snap-x":    "x var(--tw-scroll-snap-strictness)",
+		"snap-y":    "y var(--tw-scroll-snap-strictness)",
+		"snap-both": "both var(--tw-scroll-snap-strictness)",
 	}
 	if v, ok := snapTypes[class]; ok {
 		return map[string]any{"scroll-snap-type": v}
@@ -2702,26 +2703,26 @@ func (p *Parser) parseSVG(class string) map[string]any {
 func (p *Parser) parseAccessibility(class string) map[string]any {
 	if class == "sr-only" {
 		return map[string]any{
-			"position": "absolute",
-			"width":    "1px",
-			"height":   "1px",
-			"padding":  "0",
-			"margin":   "-1px",
-			"overflow": "hidden",
-			"clip":     "rect(0, 0, 0, 0)",
-			"white-space": "nowrap",
+			"position":     "absolute",
+			"width":        "1px",
+			"height":       "1px",
+			"padding":      "0",
+			"margin":       "-1px",
+			"overflow":     "hidden",
+			"clip":         "rect(0, 0, 0, 0)",
+			"white-space":  "nowrap",
 			"border-width": "0",
 		}
 	}
 	if class == "not-sr-only" {
 		return map[string]any{
-			"position": "static",
-			"width":    "auto",
-			"height":   "auto",
-			"padding":  "0",
-			"margin":   "0",
-			"overflow": "visible",
-			"clip":     "auto",
+			"position":    "static",
+			"width":       "auto",
+			"height":      "auto",
+			"padding":     "0",
+			"margin":      "0",
+			"overflow":    "visible",
+			"clip":        "auto",
 			"white-space": "normal",
 		}
 	}
@@ -2740,9 +2741,9 @@ func (p *Parser) parseAccessibility(class string) map[string]any {
 
 func (p *Parser) parseListStyle(class string) map[string]any {
 	listStyles := map[string]string{
-		"list-none":     "none",
-		"list-disc":     "disc",
-		"list-decimal":  "decimal",
+		"list-none":    "none",
+		"list-disc":    "disc",
+		"list-decimal": "decimal",
 	}
 	if v, ok := listStyles[class]; ok {
 		return map[string]any{"list-style-type": v}
@@ -2891,9 +2892,54 @@ func parseFraction(s string) (string, string, bool) {
 }
 
 func applyOpacity(color, opacity string) string {
-	// Return the color as-is for now; real implementations would convert hex to rgb
-	// and apply opacity. For now we use CSS color-mix or the raw value.
+	if strings.HasPrefix(color, "#") {
+		if rgba, ok := hexToRGBA(color, opacity); ok {
+			return rgba
+		}
+	}
 	return fmt.Sprintf("color-mix(in srgb, %s %s%%, transparent)", color, opacityToPercent(opacity))
+}
+
+func hexToRGBA(color, opacity string) (string, bool) {
+	hex := strings.TrimPrefix(color, "#")
+	var r, g, b uint64
+	switch len(hex) {
+	case 3:
+		var err error
+		r, err = strconv.ParseUint(string(hex[0])+string(hex[0]), 16, 8)
+		if err != nil {
+			return "", false
+		}
+		g, err = strconv.ParseUint(string(hex[1])+string(hex[1]), 16, 8)
+		if err != nil {
+			return "", false
+		}
+		b, err = strconv.ParseUint(string(hex[2])+string(hex[2]), 16, 8)
+		if err != nil {
+			return "", false
+		}
+	case 6:
+		var err error
+		r, err = strconv.ParseUint(hex[0:2], 16, 8)
+		if err != nil {
+			return "", false
+		}
+		g, err = strconv.ParseUint(hex[2:4], 16, 8)
+		if err != nil {
+			return "", false
+		}
+		b, err = strconv.ParseUint(hex[4:6], 16, 8)
+		if err != nil {
+			return "", false
+		}
+	default:
+		return "", false
+	}
+	alpha, err := strconv.ParseFloat(opacity, 64)
+	if err != nil {
+		return "", false
+	}
+	return fmt.Sprintf("rgba(%d, %d, %d, %s)", r, g, b, strconv.FormatFloat(alpha, 'f', -1, 64)), true
 }
 
 func opacityToPercent(opacity string) string {

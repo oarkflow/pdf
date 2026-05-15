@@ -6,9 +6,10 @@ import (
 
 // PageRule holds parsed @page rule information.
 type PageRule struct {
-	Size    [2]float64
-	Margins [4]float64
-	Marks   string
+	Size       [2]float64
+	Margins    [4]float64
+	MarginsSet bool
+	Marks      string
 }
 
 // parsePageRules extracts page configuration from a stylesheet's @page rules.
@@ -31,14 +32,19 @@ func parsePageRules(stylesheet *Stylesheet) *PageRule {
 				rule.Margins[1] = parseLengthValue(sides[1], 12, 12)
 				rule.Margins[2] = parseLengthValue(sides[2], 12, 12)
 				rule.Margins[3] = parseLengthValue(sides[3], 12, 12)
+				rule.MarginsSet = true
 			case "margin-top":
 				rule.Margins[0] = parseLengthValue(v, 12, 12)
+				rule.MarginsSet = true
 			case "margin-right":
 				rule.Margins[1] = parseLengthValue(v, 12, 12)
+				rule.MarginsSet = true
 			case "margin-bottom":
 				rule.Margins[2] = parseLengthValue(v, 12, 12)
+				rule.MarginsSet = true
 			case "margin-left":
 				rule.Margins[3] = parseLengthValue(v, 12, 12)
+				rule.MarginsSet = true
 			case "marks":
 				rule.Marks = v
 			}

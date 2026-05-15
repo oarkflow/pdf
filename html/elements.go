@@ -222,7 +222,6 @@ buildResult:
 		}
 		overflowDiv.BoxModel.MarginTop = 0
 		overflowDiv.BoxModel.BorderTopWidth = 0
-		overflowDiv.BoxModel.PaddingTop = 0
 
 		return layout.LayoutPlan{
 			Status:   layout.LayoutPartial,
@@ -2324,13 +2323,33 @@ func drawStyledRun(ctx *layout.DrawContext, run layout.TextRun, defaultColor [3]
 		}
 		text = run.Text
 	}
-	fn, operand := layout.PrepareTextOperand(ctx, fontName, run.Bold, run.Italic, run.FontFace, text)
-
 	color := defaultColor
 	if run.Color != ([3]float64{}) {
 		color = run.Color
 	}
 
+	if run.FontFace != nil {
+		if shapedFont, glyphs, ok := layout.PrepareShapedText(ctx, fontName, run.Bold, run.Italic, run.FontFace, text, fs); ok {
+			ctx.WriteString(fmt.Sprintf("BT\n/%s %.1f Tf\n%.3f %.3f %.3f rg\n",
+				shapedFont, fs, color[0], color[1], color[2]))
+			curX := x
+			curY := baselineY
+			for _, glyph := range glyphs {
+				ctx.WriteString(fmt.Sprintf("1 0 0 1 %.2f %.2f Tm\n%s Tj\n",
+					curX+glyph.XOffset, curY+glyph.YOffset, glyph.Operand))
+				curX += glyph.XAdvance
+				curY += glyph.YAdvance
+			}
+			ctx.WriteString("ET\n")
+			width := shapedGlyphsWidth(glyphs)
+			if run.Link != "" && width > 0 {
+				ctx.AddLink(x, lineTopY-fs, x+width, lineTopY, run.Link)
+			}
+			return width
+		}
+	}
+
+	fn, operand := layout.PrepareTextOperand(ctx, fontName, run.Bold, run.Italic, run.FontFace, text)
 	ctx.WriteString(fmt.Sprintf("BT\n/%s %.1f Tf\n%.3f %.3f %.3f rg\n%.2f %.2f Td\n%s Tj\nET\n",
 		fn, fs, color[0], color[1], color[2], x, baselineY, operand))
 
@@ -2340,6 +2359,14 @@ func drawStyledRun(ctx *layout.DrawContext, run layout.TextRun, defaultColor [3]
 	}
 	if run.Link != "" && width > 0 {
 		ctx.AddLink(x, lineTopY-fs, x+width, lineTopY, run.Link)
+	}
+	return width
+}
+
+func shapedGlyphsWidth(glyphs []layout.PositionedGlyph) float64 {
+	width := 0.0
+	for _, glyph := range glyphs {
+		width += glyph.XAdvance
 	}
 	return width
 }
@@ -2559,6 +2586,15 @@ func measureStrWithFace(s string, fontSize float64, face pdffont.Face) float64 {
 	upem := face.UnitsPerEm()
 	if upem <= 0 {
 		return measureStr(s, fontSize, false, "")
+	}
+	if shaper, ok := face.(pdffont.Shaper); ok && strings.IndexFunc(s, func(r rune) bool { return r > 127 }) >= 0 {
+		if glyphs, shaped := shaper.ShapeText(s); shaped {
+			total := 0
+			for _, glyph := range glyphs {
+				total += glyph.XAdvance
+			}
+			return float64(total) * fontSize / float64(upem)
+		}
 	}
 	var totalAdv int
 	for _, r := range s {
@@ -2851,7 +2887,8 @@ func drawBoxShadow(ctx *layout.DrawContext, x, y, width, height float64, bm layo
 	if !ok {
 		return
 	}
-	if !shouldRenderBoxShadow(bm.BoxShadow, blur, spread, alpha) {
+	if !shouldRenderVectorBoxShadow(bm.BoxShadow, blur, spread, alpha) {
+		drawRasterBoxShadow(ctx, x, y, width, height, offsetX, offsetY, blur, spread, color, alpha)
 		return
 	}
 	expand := spread + blur*0.5
@@ -2875,6 +2912,90 @@ func drawBoxShadow(ctx *layout.DrawContext, x, y, width, height float64, bm layo
 	}
 	ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f rg %.2f %.2f %.2f %.2f re f\n",
 		color[0], color[1], color[2], shadowX, shadowY, shadowW, shadowH))
+}
+
+func drawRasterBoxShadow(ctx *layout.DrawContext, x, y, width, height, offsetX, offsetY, blur, spread float64, color [3]float64, alpha float64) {
+	if alpha <= 0 {
+		return
+	}
+	if blur < 0 {
+		blur = 0
+	}
+	blurPad := math.Max(blur*1.5, 1)
+	shadowX := x + offsetX - spread - blurPad
+	shadowY := y - offsetY - spread - blurPad
+	shadowW := width + 2*(spread+blurPad)
+	shadowH := height + 2*(spread+blurPad)
+	if shadowW <= 0 || shadowH <= 0 {
+		return
+	}
+
+	pixelW := int(math.Ceil(math.Min(shadowW, 512)))
+	pixelH := int(math.Ceil(math.Min(shadowH, 512)))
+	if pixelW < 1 || pixelH < 1 {
+		return
+	}
+	scaleX := shadowW / float64(pixelW)
+	scaleY := shadowH / float64(pixelH)
+
+	r := byte(math.Round(clamp01(color[0]) * 255))
+	g := byte(math.Round(clamp01(color[1]) * 255))
+	b := byte(math.Round(clamp01(color[2]) * 255))
+	rgb := make([]byte, pixelW*pixelH*3)
+	mask := make([]byte, pixelW*pixelH)
+	for i := 0; i < pixelW*pixelH; i++ {
+		rgb[i*3] = r
+		rgb[i*3+1] = g
+		rgb[i*3+2] = b
+	}
+
+	rectLeft := (spread + blurPad) / scaleX
+	rectTop := (spread + blurPad) / scaleY
+	rectRight := float64(pixelW) - rectLeft
+	rectBottom := float64(pixelH) - rectTop
+	blurPx := math.Max(blur/math.Max(scaleX, scaleY), 1)
+	for py := 0; py < pixelH; py++ {
+		for px := 0; px < pixelW; px++ {
+			fx := float64(px) + 0.5
+			fy := float64(py) + 0.5
+			dx := math.Max(math.Max(rectLeft-fx, 0), fx-rectRight)
+			dy := math.Max(math.Max(rectTop-fy, 0), fy-rectBottom)
+			if dx == 0 && dy == 0 {
+				continue
+			}
+			dist := math.Hypot(dx, dy)
+			coverage := math.Exp(-(dist * dist) / (2 * blurPx * blurPx))
+			mask[py*pixelW+px] = byte(math.Round(clamp01(alpha*coverage) * 255))
+		}
+	}
+
+	imgName := fmt.Sprintf("Im%d", len(ctx.Images)+1)
+	ctx.Images[imgName] = layout.ImageEntry{
+		PDFName: imgName,
+		Width:   pixelW,
+		Height:  pixelH,
+		Image: &pdfimage.Image{
+			Width:       pixelW,
+			Height:      pixelH,
+			ColorSpace:  "DeviceRGB",
+			BitsPerComp: 8,
+			Data:        rgb,
+			AlphaData:   mask,
+			Filter:      "FlateDecode",
+		},
+	}
+	ctx.WriteString(fmt.Sprintf("q %.2f 0 0 %.2f %.2f %.2f cm /%s Do Q\n",
+		shadowW, shadowH, shadowX, shadowY, imgName))
+}
+
+func clamp01(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
 }
 
 func drawBoxSides(ctx *layout.DrawContext, x, topY, width, height float64, bm layout.BoxModel) {
@@ -3100,7 +3221,7 @@ func parseBoxShadow(value string) (float64, float64, float64, float64, [3]float6
 	return lengths[0], lengths[1], blur, spread, color, alpha, true
 }
 
-func shouldRenderBoxShadow(value string, blur, spread, alpha float64) bool {
+func shouldRenderVectorBoxShadow(value string, blur, spread, alpha float64) bool {
 	if len(splitTopLevelCSV(value)) > 1 {
 		return false
 	}

@@ -20,6 +20,7 @@ import (
 	"github.com/oarkflow/pdf/core"
 	pdffont "github.com/oarkflow/pdf/font"
 	"github.com/oarkflow/pdf/html"
+	"github.com/oarkflow/pdf/reader"
 	"github.com/oarkflow/pdf/template"
 )
 
@@ -175,6 +176,25 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Println("Generated invoice.pdf")
+	validateGeneratedPDF("invoice.pdf", "", "INVOICE", d.Number, d.From.Name, d.To.Name)
+
+	streamFile, err := os.Create("invoice_streaming.pdf")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating streaming invoice: %v\n", err)
+		os.Exit(1)
+	}
+	err = pdf.FromHTMLStreaming(invoiceHTML, streamFile, baseOpt)
+	closeErr := streamFile.Close()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error generating streaming invoice: %v\n", err)
+		os.Exit(1)
+	}
+	if closeErr != nil {
+		fmt.Fprintf(os.Stderr, "Error closing streaming invoice: %v\n", closeErr)
+		os.Exit(1)
+	}
+	fmt.Println("Generated invoice_streaming.pdf")
+	validateGeneratedPDF("invoice_streaming.pdf", "", "INVOICE", d.Number, d.From.Name, d.To.Name)
 
 	protectedOpt := baseOpt
 	protectedOpt.Encryption = &core.EncryptionConfig{
@@ -189,6 +209,7 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Println("Generated invoice_protected.pdf (password: open-sesame)")
+	validateGeneratedPDF("invoice_protected.pdf", "open-sesame", "INVOICE", d.Number, d.From.Name, d.To.Name)
 
 	// Also generate PDF from the Tailwind-styled invoice.html file
 	htmlBytes, err := os.ReadFile("examples/html_invoice/invoice.html")
@@ -210,6 +231,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error generating tailwind invoice: %v\n", err)
 		} else {
 			fmt.Println("Generated invoice_tailwind.pdf")
+			validateGeneratedPDF("invoice_tailwind.pdf", "", "Monthly Newsletter", "Latest Updates")
 		}
 
 		protectedTailwindOpt := tailwindOpt
@@ -224,6 +246,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error generating protected tailwind invoice: %v\n", err)
 		} else {
 			fmt.Println("Generated invoice_tailwind_protected.pdf (password: open-sesame)")
+			validateGeneratedPDF("invoice_tailwind_protected.pdf", "open-sesame", "Monthly Newsletter", "Latest Updates")
 		}
 	}
 
@@ -231,9 +254,61 @@ func main() {
 	generatePassportSifarish()
 }
 
+func validateGeneratedPDF(path, password string, requiredText ...string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not read %s for validation: %v\n", path, err)
+		return
+	}
+	r, err := reader.OpenWithPassword(data, password)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not open %s for validation: %v\n", path, err)
+		return
+	}
+	if r.NumPages() == 0 {
+		fmt.Fprintf(os.Stderr, "Warning: %s has no pages\n", path)
+		return
+	}
+	text, err := r.ExtractText(0)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not extract text from %s: %v\n", path, err)
+		return
+	}
+	for _, want := range requiredText {
+		if !strings.Contains(text, want) {
+			fmt.Fprintf(os.Stderr, "Warning: %s missing expected text %q\n", path, want)
+			return
+		}
+	}
+	fmt.Printf("Validated %s (%d page(s))\n", path, r.NumPages())
+}
+
 func generatePassportSifarish() {
 	// Example data for passport sifarish patra
 	passportData := map[string]any{
+		// Layout controls. Defaults use the full PDF page with no outer
+		// margin/padding. Set PASSPORT_PAGE_PADDING=18mm 20mm 18mm 20mm,
+		// PASSPORT_PAGE_BORDER_TOP=6px solid #1a3a6b, etc. for a padded
+		// government-letter layout.
+		"page_margin":                 envString("PASSPORT_PAGE_MARGIN", "0"),
+		"page_padding":                envString("PASSPORT_PAGE_PADDING", "0"),
+		"print_page_padding":          envString("PASSPORT_PRINT_PAGE_PADDING", envString("PASSPORT_PAGE_PADDING", "0")),
+		"page_width":                  envString("PASSPORT_PAGE_WIDTH", "100vw"),
+		"page_height":                 envString("PASSPORT_PAGE_HEIGHT", "100vh"),
+		"page_border_top":             envString("PASSPORT_PAGE_BORDER_TOP", "0"),
+		"letterhead_margin_bottom":    envString("PASSPORT_LETTERHEAD_MARGIN_BOTTOM", "0"),
+		"meta_margin":                 envString("PASSPORT_META_MARGIN", "0"),
+		"subject_margin":              envString("PASSPORT_SUBJECT_MARGIN", "0"),
+		"block_margin_bottom":         envString("PASSPORT_BLOCK_MARGIN_BOTTOM", "0"),
+		"details_heading_margin":      envString("PASSPORT_DETAILS_HEADING_MARGIN", "0"),
+		"details_table_margin_bottom": envString("PASSPORT_DETAILS_TABLE_MARGIN_BOTTOM", "0"),
+		"details_cell_padding":        envString("PASSPORT_DETAILS_CELL_PADDING", "0"),
+		"signature_margin_top":        envString("PASSPORT_SIGNATURE_MARGIN_TOP", "0"),
+		"signature_gap":               envString("PASSPORT_SIGNATURE_GAP", "0"),
+		"seal_padding":                envString("PASSPORT_SEAL_PADDING", "0"),
+		"footer_margin_top":           envString("PASSPORT_FOOTER_MARGIN_TOP", "0"),
+		"footer_padding_top":          envString("PASSPORT_FOOTER_PADDING_TOP", "0"),
+
 		// Letterhead / Office details
 		"municipality_name": "बुटवल उपमहानगरपालिका",
 		"ward_number":       "१२",
@@ -324,11 +399,12 @@ func generatePassportSifarish() {
 		},
 	}
 
-	if err = pdf.FromHTML(renderedHTML, "passport_sifarish_patra.pdf", opt); err != nil {
+	outputPath := envString("PASSPORT_OUTPUT", "passport_sifarish_patra.pdf")
+	if err = pdf.FromHTML(renderedHTML, outputPath, opt); err != nil {
 		fmt.Fprintf(os.Stderr, "Error generating passport sifarish PDF: %v\n", err)
 		return
 	}
-	fmt.Println("Generated passport_sifarish_patra.pdf")
+	fmt.Printf("Generated %s\n", outputPath)
 }
 
 // ---------------------------------------------------------------------------
@@ -370,6 +446,13 @@ func loadLogoDataURI() string {
 	}
 
 	return ""
+}
+
+func envString(name, fallback string) string {
+	if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+		return value
+	}
+	return fallback
 }
 
 func fmtMoney(v float64) string {

@@ -162,6 +162,60 @@ func TestDivElementDefersOvertallFullChildToNextPage(t *testing.T) {
 	}
 }
 
+func TestDivElementOverflowContinuationKeepsPadding(t *testing.T) {
+	overflowChild := testElement{
+		plan: layout.LayoutPlan{
+			Status:   layout.LayoutFull,
+			Consumed: 5,
+			Blocks:   []layout.PlacedBlock{{Width: 20, Height: 5}},
+		},
+	}
+	el := &DivElement{
+		BoxModel: layout.BoxModel{
+			PaddingTop:    12,
+			PaddingBottom: 8,
+		},
+		Children: []layout.Element{
+			testElement{
+				plan: layout.LayoutPlan{
+					Status:   layout.LayoutPartial,
+					Consumed: 10,
+					Blocks:   []layout.PlacedBlock{{Width: 20, Height: 10}},
+					Overflow: overflowChild,
+				},
+			},
+		},
+	}
+
+	plan := el.PlanLayout(layout.LayoutArea{Width: 100, Height: 30})
+	if plan.Status != layout.LayoutPartial {
+		t.Fatalf("status = %v, want partial", plan.Status)
+	}
+	overflow, ok := plan.Overflow.(*DivElement)
+	if !ok {
+		t.Fatalf("overflow = %T, want *DivElement", plan.Overflow)
+	}
+	next := overflow.PlanLayout(layout.LayoutArea{Width: 100, Height: 30})
+	if next.Status != layout.LayoutFull {
+		t.Fatalf("next status = %v, want full", next.Status)
+	}
+	if len(next.Blocks) == 0 {
+		t.Fatal("next page has no blocks")
+	}
+	foundChildAtPadding := false
+	for _, block := range next.Blocks {
+		if block.Y == 12 {
+			foundChildAtPadding = true
+		}
+	}
+	if !foundChildAtPadding {
+		t.Fatalf("overflow blocks = %#v, want child Y offset by padding top", next.Blocks)
+	}
+	if next.Consumed != 25 {
+		t.Fatalf("next consumed = %.2f, want 25.00", next.Consumed)
+	}
+}
+
 func TestDivElementOverflowHiddenClipsChildren(t *testing.T) {
 	el := &DivElement{
 		Style: &ComputedStyle{Overflow: "hidden"},

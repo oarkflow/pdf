@@ -55,6 +55,7 @@ func collectAnonymousInlineChildren(node *Node, c *converter) []anonymousChild {
 						Text:     " ",
 						FontName: node.Style.FontFamily,
 						FontSize: node.Style.FontSize,
+						FontFace: resolveFontFaceWithFallback(node.Style.FontFamily, c.opts.FontFaces, " "),
 						Color:    node.Style.Color,
 					})
 				}
@@ -99,6 +100,7 @@ func collectAnonymousInlineChildren(node *Node, c *converter) []anonymousChild {
 							Text:     strings.Repeat(" ", numSpaces),
 							FontName: childStyle.FontFamily,
 							FontSize: childStyle.FontSize,
+							FontFace: resolveFontFaceWithFallback(childStyle.FontFamily, c.opts.FontFaces, " "),
 							Color:    childStyle.Color,
 						})
 					}

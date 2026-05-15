@@ -11,6 +11,7 @@ type FontInfo struct {
 	Name        string
 	Encoding    string
 	ToUnicode   map[uint16]rune
+	ToUnicodeS  map[uint16]string
 	Differences map[byte]string // glyph name remapping from /Encoding /Differences
 	Widths      map[int]float64
 	BaseFont    string
@@ -28,6 +29,7 @@ func ParseFontInfo(resolver *Resolver, fontDict map[string]interface{}) (*FontIn
 		Name:        fi.name,
 		Encoding:    fi.encoding,
 		ToUnicode:   fi.toUnicode,
+		ToUnicodeS:  fi.toUnicodeS,
 		Differences: fi.differences,
 		Widths:      fi.widths,
 		BaseFont:    fi.baseFont,
@@ -49,7 +51,7 @@ func DecodeString(fi *FontInfo, s string) string {
 	if fi == nil {
 		return s
 	}
-	if fi.IsType0 && fi.ToUnicode != nil {
+	if fi.IsType0 && fi.ToUnicodeS != nil {
 		return decodeType0Exported(fi, s)
 	}
 	if fi.ToUnicode != nil {
@@ -106,16 +108,16 @@ func decodeByteWithEncoding(b byte, encoding string) rune {
 }
 
 func decodeType0Exported(fi *FontInfo, s string) string {
-	var buf []byte
+	var buf strings.Builder
 	for i := 0; i+1 < len(s); i += 2 {
 		code := uint16(s[i])<<8 | uint16(s[i+1])
-		if r, ok := fi.ToUnicode[code]; ok {
-			buf = append(buf, []byte(string(r))...)
+		if mapped, ok := fi.ToUnicodeS[code]; ok {
+			buf.WriteString(mapped)
 		} else {
-			buf = append(buf, []byte(string(rune(code)))...)
+			buf.WriteRune(rune(code))
 		}
 	}
-	return string(buf)
+	return buf.String()
 }
 
 func decodeWithToUnicode(fi *FontInfo, s string) string {

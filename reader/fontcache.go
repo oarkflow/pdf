@@ -1,8 +1,10 @@
 package reader
 
 import (
+	"encoding/hex"
 	"strconv"
 	"strings"
+	"unicode/utf16"
 )
 
 // fontInfo holds parsed font data for text extraction.
@@ -10,6 +12,7 @@ type fontInfo struct {
 	name        string
 	encoding    string // /WinAnsiEncoding, /MacRomanEncoding, etc.
 	toUnicode   map[uint16]rune
+	toUnicodeS  map[uint16]string
 	differences map[byte]string // /Differences array from encoding dict
 	widths      map[int]float64
 	baseFont    string
@@ -68,7 +71,8 @@ func parseFontInfo(resolver *Resolver, fontDict map[string]interface{}) (*fontIn
 			return nil, err
 		}
 		if data != nil {
-			fi.toUnicode = parseToUnicodeCMap(data)
+			fi.toUnicodeS = parseToUnicodeCMapStrings(data)
+			fi.toUnicode = firstRuneMap(fi.toUnicodeS)
 		}
 	}
 
@@ -89,7 +93,24 @@ func parseFontInfo(resolver *Resolver, fontDict map[string]interface{}) (*fontIn
 // parseToUnicodeCMap parses a ToUnicode CMap stream and returns a mapping
 // from character codes to Unicode runes.
 func parseToUnicodeCMap(data []byte) map[uint16]rune {
+	return firstRuneMap(parseToUnicodeCMapStrings(data))
+}
+
+func firstRuneMap(stringsMap map[uint16]string) map[uint16]rune {
 	result := make(map[uint16]rune)
+	for code, s := range stringsMap {
+		for _, r := range s {
+			result[code] = r
+			break
+		}
+	}
+	return result
+}
+
+// parseToUnicodeCMapStrings parses a ToUnicode CMap stream and returns a
+// mapping from character codes to Unicode strings.
+func parseToUnicodeCMapStrings(data []byte) map[uint16]string {
+	result := make(map[uint16]string)
 	s := string(data)
 
 	// Parse beginbfchar ... endbfchar sections.
@@ -106,7 +127,7 @@ func parseToUnicodeCMap(data []byte) map[uint16]rune {
 		section := s[:endIdx]
 		s = s[endIdx+len("endbfchar"):]
 
-		parseBfCharSection(section, result)
+		parseBfCharSectionString(section, result)
 	}
 
 	// Reset and parse beginbfrange ... endbfrange sections.
@@ -124,13 +145,24 @@ func parseToUnicodeCMap(data []byte) map[uint16]rune {
 		section := s[:endIdx]
 		s = s[endIdx+len("endbfrange"):]
 
-		parseBfRangeSection(section, result)
+		parseBfRangeSectionString(section, result)
 	}
 
 	return result
 }
 
 func parseBfCharSection(section string, result map[uint16]rune) {
+	stringResult := make(map[uint16]string)
+	parseBfCharSectionString(section, stringResult)
+	for code, s := range stringResult {
+		for _, r := range s {
+			result[code] = r
+			break
+		}
+	}
+}
+
+func parseBfCharSectionString(section string, result map[uint16]string) {
 	tok := NewTokenizer([]byte(section))
 	for {
 		srcTok, err := tok.Next()
@@ -143,14 +175,25 @@ func parseBfCharSection(section string, result map[uint16]rune) {
 		}
 
 		srcCode := parseHexCode(srcTok)
-		dstRune := parseHexRune(dstTok)
-		if srcCode >= 0 && dstRune >= 0 {
-			result[uint16(srcCode)] = rune(dstRune)
+		dst, ok := parseHexUnicodeString(dstTok)
+		if srcCode >= 0 && ok {
+			result[uint16(srcCode)] = dst
 		}
 	}
 }
 
 func parseBfRangeSection(section string, result map[uint16]rune) {
+	stringResult := make(map[uint16]string)
+	parseBfRangeSectionString(section, stringResult)
+	for code, s := range stringResult {
+		for _, r := range s {
+			result[code] = r
+			break
+		}
+	}
+}
+
+func parseBfRangeSectionString(section string, result map[uint16]string) {
 	tok := NewTokenizer([]byte(section))
 	for {
 		startTok, err := tok.Next()
@@ -179,9 +222,9 @@ func parseBfRangeSection(section string, result map[uint16]rune) {
 				if err != nil || valTok.Type == TokenArrayEnd || valTok.Type == TokenEOF {
 					break
 				}
-				r := parseHexRune(valTok)
-				if r >= 0 {
-					result[uint16(code)] = rune(r)
+				s, ok := parseHexUnicodeString(valTok)
+				if ok {
+					result[uint16(code)] = s
 				}
 			}
 			// Consume remaining array end if needed.
@@ -201,7 +244,7 @@ func parseBfRangeSection(section string, result map[uint16]rune) {
 			dstRune := parseHexRune(dstTok)
 			if dstRune >= 0 {
 				for code := startCode; code <= endCode; code++ {
-					result[uint16(code)] = rune(dstRune + (code - startCode))
+					result[uint16(code)] = string(rune(dstRune + (code - startCode)))
 				}
 			}
 		}
@@ -228,6 +271,27 @@ func parseHexRune(t Token) int {
 		return int(v)
 	}
 	return -1
+}
+
+func parseHexUnicodeString(t Token) (string, bool) {
+	if t.Type != TokenHexString {
+		return "", false
+	}
+	data, err := hex.DecodeString(t.Value)
+	if err != nil {
+		return "", false
+	}
+	if len(data) == 0 {
+		return "", true
+	}
+	if len(data)%2 != 0 {
+		return string(data), true
+	}
+	units := make([]uint16, 0, len(data)/2)
+	for i := 0; i+1 < len(data); i += 2 {
+		units = append(units, uint16(data[i])<<8|uint16(data[i+1]))
+	}
+	return string(utf16.Decode(units)), true
 }
 
 // parseDifferences parses a PDF /Differences array.
@@ -267,7 +331,7 @@ var GlyphNameToUnicode = map[string]rune{
 	"eight": '8', "nine": '9', "colon": ':', "semicolon": ';',
 	"less": '<', "equal": '=', "greater": '>', "question": '?',
 	"at": '@',
-	"A": 'A', "B": 'B', "C": 'C', "D": 'D', "E": 'E', "F": 'F',
+	"A":  'A', "B": 'B', "C": 'C', "D": 'D', "E": 'E', "F": 'F',
 	"G": 'G', "H": 'H', "I": 'I', "J": 'J', "K": 'K', "L": 'L',
 	"M": 'M', "N": 'N', "O": 'O', "P": 'P', "Q": 'Q', "R": 'R',
 	"S": 'S', "T": 'T', "U": 'U', "V": 'V', "W": 'W', "X": 'X',
@@ -312,7 +376,7 @@ var GlyphNameToUnicode = map[string]rune{
 	"fraction": '⁄', "minus": '−',
 	"periodcentered": '·', "quotesinglbase": '‚', "quotedblbase": '„',
 	"perthousand": '‰',
-	"Scaron": 'Š', "scaron": 'š', "Zcaron": 'Ž', "zcaron": 'ž',
+	"Scaron":      'Š', "scaron": 'š', "Zcaron": 'Ž', "zcaron": 'ž',
 	"OE": 'Œ', "oe": 'œ', "Ydieresis": 'Ÿ',
 	"lozenge": '◊', "dotlessi": 'ı',
 	"circumflex": 'ˆ', "tilde": '˜', "macron": '¯',

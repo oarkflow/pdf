@@ -97,7 +97,6 @@ buildResult:
 		// No top margin/border on overflow continuation
 		overflowDiv.Box.MarginTop = 0
 		overflowDiv.Box.BorderTopWidth = 0
-		overflowDiv.Box.PaddingTop = 0
 
 		return LayoutPlan{
 			Status:   LayoutPartial,

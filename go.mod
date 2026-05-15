@@ -4,15 +4,16 @@ go 1.26.1
 
 require (
 	github.com/dop251/goja v0.0.0-20260311135729-065cd970411c // only used with -tags js_engine
-	golang.org/x/image v0.37.0
-	golang.org/x/net v0.52.0
+	golang.org/x/image v0.40.0
+	golang.org/x/net v0.54.0
 )
 
 require github.com/oarkflow/fasttpl v0.0.3
 
 require (
-	github.com/dlclark/regexp2 v1.11.4 // indirect
-	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
-	github.com/google/pprof v0.0.0-20230207041349-798e818bf904 // indirect
-	golang.org/x/text v0.35.0 // indirect
+	github.com/dlclark/regexp2 v1.12.0 // indirect
+	github.com/go-sourcemap/sourcemap v2.1.4+incompatible // indirect
+	github.com/go-text/typesetting v0.3.4 // indirect
+	github.com/google/pprof v0.0.0-20260507013755-92041b743c96 // indirect
+	golang.org/x/text v0.37.0 // indirect
 )

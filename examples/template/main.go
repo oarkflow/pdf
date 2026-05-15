@@ -17,7 +17,7 @@ func main() {
   <style>
     body { font-family: Helvetica, sans-serif; color: #333; }
     h1 { color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 8px; }
-    .info { margin: 12px 0; }
+    .info { margin: 12px 0; padding: 12px; background: #f8f9fa; border-radius: 6px; }
     .admin-badge { background: #e74c3c; color: white; padding: 2px 8px; border-radius: 4px; font-size: 10px; }
     table { width: 100%; border-collapse: collapse; margin: 16px 0; }
     th { background: #3498db; color: white; padding: 8px 12px; text-align: left; }

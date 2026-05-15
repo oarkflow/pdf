@@ -32,6 +32,16 @@ func TestConvert_DefaultOptions(t *testing.T) {
 	}
 }
 
+func TestConvert_PageRuleZeroMarginOverridesDefaultCanvasMargin(t *testing.T) {
+	result, err := Convert(`<!doctype html><html><head><style>@page { size: A4; margin: 0; }</style></head><body><div>Full page</div></body></html>`, Options{})
+	if err != nil {
+		t.Fatalf("Convert() error = %v", err)
+	}
+	if result.Config.Margins != ([4]float64{}) {
+		t.Fatalf("margins = %v, want all zero", result.Config.Margins)
+	}
+}
+
 func TestConvert_Headings(t *testing.T) {
 	html := `<html><body><h1>Title</h1><h2>Subtitle</h2><h3>Section</h3></body></html>`
 	result, err := Convert(html, Options{})

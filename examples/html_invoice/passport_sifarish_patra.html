@@ -7,14 +7,17 @@
 <style>
   @page {
     size: A4 portrait;
-    margin: 0;
+    margin: {{page_margin}};
   }
 
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
   html, body {
     width: 100%;
+    height: 100%;
     background: #ffffff;
+    margin: 0;
+    padding: 0;
   }
 
   body {
@@ -24,10 +27,11 @@
 
   .page {
     background: #fefcf8;
-    width: 100%;
-    padding: 18mm 20mm 18mm 20mm;
+    width: {{page_width}};
+    height: {{page_height}};
+    padding: {{page_padding}};
     position: relative;
-    border-top: 6px solid #1a3a6b;
+    border-top: {{page_border_top}};
   }
 
   .content { position: relative; z-index: 1; }
@@ -36,7 +40,7 @@
     text-align: center;
     padding-bottom: 12px;
     border-bottom: 2.5px double #1a3a6b;
-    margin-bottom: 14px;
+    margin-bottom: {{letterhead_margin_bottom}};
   }
 
   .gov-label {
@@ -78,7 +82,7 @@
     display: flex;
     justify-content: space-between;
     font-size: 12.5px;
-    margin: 12px 0 8px 0;
+    margin: {{meta_margin}};
     color: #333;
   }
 
@@ -90,14 +94,14 @@
     text-decoration: underline;
     text-decoration-color: #1a3a6b;
     text-underline-offset: 4px;
-    margin: 14px 0 14px 0;
+    margin: {{subject_margin}};
     letter-spacing: 0.5px;
   }
 
   .addressee {
     font-size: 13px;
     line-height: 1.8;
-    margin-bottom: 14px;
+    margin-bottom: {{block_margin_bottom}};
     color: #222;
   }
 
@@ -109,7 +113,7 @@
     text-align: justify;
     text-indent: 36px;
     color: #1a1a1a;
-    margin-bottom: 14px;
+    margin-bottom: {{block_margin_bottom}};
   }
 
   .details-heading {
@@ -118,14 +122,14 @@
     color: #1a3a6b;
     border-left: 4px solid #1a3a6b;
     padding-left: 8px;
-    margin: 14px 0 8px 0;
+    margin: {{details_heading_margin}};
   }
 
   .details-table {
     width: 100%;
     border-collapse: collapse;
     font-size: 12.5px;
-    margin-bottom: 16px;
+    margin-bottom: {{details_table_margin_bottom}};
   }
 
   .details-table tr:nth-child(even) td {
@@ -133,7 +137,7 @@
   }
 
   .details-table td {
-    padding: 5px 10px;
+    padding: {{details_cell_padding}};
     vertical-align: top;
     color: #222;
     border: 1px solid #dce4f0;
@@ -166,15 +170,15 @@
     text-align: justify;
     text-indent: 36px;
     color: #1a1a1a;
-    margin-bottom: 10px;
+    margin-bottom: {{block_margin_bottom}};
   }
 
   .signature-section {
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
-    margin-top: 36px;
-    gap: 20px;
+    margin-top: {{signature_margin_top}};
+    gap: {{signature_gap}};
   }
 
   .sig-block {
@@ -210,14 +214,14 @@
     color: #1a3a6b;
     flex-shrink: 0;
     opacity: 0.6;
-    padding: 10px;
+    padding: {{seal_padding}};
     line-height: 1.5;
   }
 
   .footer {
     border-top: 1.5px solid #1a3a6b;
-    margin-top: 22px;
-    padding-top: 10px;
+    margin-top: {{footer_margin_top}};
+    padding-top: {{footer_padding_top}};
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -245,9 +249,10 @@
   @media print {
     body { background: white; padding: 0; }
     .page {
-      width: 100%;
-      padding: 15mm 20mm;
-      border-top: 5px solid #1a3a6b;
+      width: {{page_width}};
+      height: {{page_height}};
+      padding: {{print_page_padding}};
+      border-top: {{page_border_top}};
     }
   }
 </style>

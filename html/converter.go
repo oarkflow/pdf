@@ -232,7 +232,7 @@ func Convert(htmlString string, opts Options) (*ConvertResult, error) {
 		if pageRule.Size[1] > 0 {
 			pageConfig.Height = pageRule.Size[1]
 		}
-		if pageRule.Margins[0] > 0 || pageRule.Margins[1] > 0 || pageRule.Margins[2] > 0 || pageRule.Margins[3] > 0 {
+		if pageRule.MarginsSet {
 			pageConfig.Margins = pageRule.Margins
 		}
 	}
@@ -444,6 +444,12 @@ func (c *converter) applyStyles(node *Node, parentStyle *ComputedStyle) {
 					cssProps[k] = val
 				}
 			}
+			if shadow, ok := cssProps["box-shadow"]; ok {
+				if shadowColor := customProps["--tw-shadow-color"]; shadowColor != "" {
+					shadow.Value = applyTailwindShadowColor(shadow.Value, shadowColor)
+					cssProps["box-shadow"] = shadow
+				}
+			}
 			style.Apply(cssProps, parentStyle, c.rootFontSize)
 		}
 	}
@@ -502,6 +508,29 @@ func (c *converter) applyStyles(node *Node, parentStyle *ComputedStyle) {
 		}
 		elementIdx++
 	}
+}
+
+func applyTailwindShadowColor(shadow, color string) string {
+	layers := splitTopLevelCSV(shadow)
+	if len(layers) == 0 {
+		return shadow
+	}
+	for i, layer := range layers {
+		parts := splitCSSValues(layer)
+		replaced := false
+		for j, part := range parts {
+			if _, _, ok := parseColorWithAlpha(part); ok {
+				parts[j] = color
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			parts = append(parts, color)
+		}
+		layers[i] = strings.Join(parts, " ")
+	}
+	return strings.Join(layers, ", ")
 }
 
 func applyTagDefaults(node *Node, style *ComputedStyle) {
@@ -692,6 +721,7 @@ func (c *converter) convertDiv(node *Node) layout.Element {
 						Text:     " ",
 						FontName: node.Style.FontFamily,
 						FontSize: node.Style.FontSize,
+						FontFace: resolveFontFaceWithFallback(node.Style.FontFamily, c.opts.FontFaces, " "),
 						Color:    node.Style.Color,
 					})
 				}
@@ -753,6 +783,7 @@ func (c *converter) convertDiv(node *Node) layout.Element {
 							Text:     strings.Repeat(" ", numSpaces),
 							FontName: childStyle.FontFamily,
 							FontSize: childStyle.FontSize,
+							FontFace: resolveFontFaceWithFallback(childStyle.FontFamily, c.opts.FontFaces, " "),
 							Color:    childStyle.Color,
 						})
 					}

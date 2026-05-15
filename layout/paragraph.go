@@ -2,6 +2,7 @@ package layout
 
 import (
 	"fmt"
+	"strings"
 	"unicode/utf8"
 
 	pdffont "github.com/oarkflow/pdf/font"
@@ -64,6 +65,15 @@ func measureRunWidth(text string, fontSize float64, face pdffont.Face) float64 {
 	upem := face.UnitsPerEm()
 	if upem <= 0 {
 		return measureText(text, fontSize)
+	}
+	if shaper, ok := face.(pdffont.Shaper); ok && strings.IndexFunc(text, func(r rune) bool { return r > 127 }) >= 0 {
+		if glyphs, shaped := shaper.ShapeText(text); shaped {
+			total := 0
+			for _, glyph := range glyphs {
+				total += glyph.XAdvance
+			}
+			return float64(total) * fontSize / float64(upem)
+		}
 	}
 	var totalAdv int
 	var prevGID uint16
@@ -395,6 +405,24 @@ func drawLine(ctx *DrawContext, ln Line, x, pdfY, areaWidth float64, align Align
 	curX := startX
 	for i, w := range ln.Words {
 		for _, r := range w.Runs {
+			if r.FontFace != nil {
+				if fontKey, glyphs, ok := PrepareShapedText(ctx, r.FontName, r.Bold, r.Italic, r.FontFace, r.Text, r.FontSize); ok {
+					ctx.WriteString(fmt.Sprintf("%.3f %.3f %.3f rg\n", r.Color[0], r.Color[1], r.Color[2]))
+					ctx.WriteString("BT\n")
+					ctx.WriteString(fmt.Sprintf("/%s %.1f Tf\n", fontKey, r.FontSize))
+					baseY := pdfY - ln.Ascent
+					runWidth := 0.0
+					for _, glyph := range glyphs {
+						ctx.WriteString(fmt.Sprintf("1 0 0 1 %.2f %.2f Tm\n%s Tj\n",
+							curX+glyph.XOffset, baseY+glyph.YOffset, glyph.Operand))
+						curX += glyph.XAdvance
+						runWidth += glyph.XAdvance
+					}
+					ctx.WriteString("ET\n")
+					_ = runWidth
+					continue
+				}
+			}
 			fontKey, operand := PrepareTextOperand(ctx, r.FontName, r.Bold, r.Italic, r.FontFace, r.Text)
 
 			// Set color

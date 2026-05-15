@@ -232,7 +232,7 @@ func (e *textExtractor) decodeString(s string) string {
 	if e.curFont == nil {
 		return s
 	}
-	if e.curFont.isType0 && e.curFont.toUnicode != nil {
+	if e.curFont.isType0 && e.curFont.toUnicodeS != nil {
 		return e.decodeType0(s)
 	}
 	if e.curFont.toUnicode != nil {
@@ -255,8 +255,8 @@ func (e *textExtractor) decodeType0(s string) string {
 	var buf strings.Builder
 	for i := 0; i+1 < len(s); i += 2 {
 		code := uint16(s[i])<<8 | uint16(s[i+1])
-		if r, ok := e.curFont.toUnicode[code]; ok {
-			buf.WriteRune(r)
+		if mapped, ok := e.curFont.toUnicodeS[code]; ok {
+			buf.WriteString(mapped)
 		} else {
 			buf.WriteRune(rune(code))
 		}
