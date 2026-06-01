@@ -336,7 +336,7 @@ func (r *Resolver) parseXRefTable(tok *Tokenizer) error {
 	if err != nil {
 		return nil // tolerate missing trailer
 	}
-	if prev, ok := getInt(trailer, "Prev"); ok {
+	if prev, ok := getInt(trailer, "/Prev"); ok {
 		return r.parseXRefAt(int(prev))
 	}
 	return nil

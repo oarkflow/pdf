@@ -22,6 +22,7 @@ type Reader struct {
 	trailer  map[string]interface{}
 	catalog  map[string]interface{}
 	pages    []map[string]interface{}
+	pageRefs []IndirectRef
 }
 
 // Open parses the PDF data and returns a Reader.
@@ -84,6 +85,20 @@ func OpenFileWithPassword(path string, password string) (*Reader, error) {
 		return nil, err
 	}
 	return OpenWithPassword(data, password)
+}
+
+// IsEncrypted reports whether the PDF trailer contains an /Encrypt entry.
+func IsEncrypted(data []byte) (bool, error) {
+	resolver, err := NewResolver(data)
+	if err != nil {
+		return false, fmt.Errorf("reader: %w", err)
+	}
+	trailer, err := resolver.Trailer()
+	if err != nil {
+		return false, fmt.Errorf("reader: %w", err)
+	}
+	_, ok := trailer["/Encrypt"]
+	return ok, nil
 }
 
 // NumPages returns the number of pages in the document.
@@ -320,14 +335,16 @@ func (r *Reader) buildPageList() error {
 	if !ok {
 		return fmt.Errorf("Pages is not a dictionary")
 	}
-	return r.collectPages(pagesDict)
+	ref, _ := pagesRef.(IndirectRef)
+	return r.collectPages(pagesDict, ref)
 }
 
-func (r *Reader) collectPages(node map[string]interface{}) error {
+func (r *Reader) collectPages(node map[string]interface{}, ref IndirectRef) error {
 	typ, _ := node["/Type"].(string)
 
 	if typ == "/Page" {
 		r.pages = append(r.pages, node)
+		r.pageRefs = append(r.pageRefs, ref)
 		return nil
 	}
 
@@ -346,7 +363,8 @@ func (r *Reader) collectPages(node map[string]interface{}) error {
 		if _, exists := kidDict["_parent"]; !exists {
 			kidDict["_parent"] = node
 		}
-		if err := r.collectPages(kidDict); err != nil {
+		kidRef, _ := kid.(IndirectRef)
+		if err := r.collectPages(kidDict, kidRef); err != nil {
 			return err
 		}
 	}

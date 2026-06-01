@@ -33,6 +33,7 @@ type Page struct {
 	Size        PageSize
 	Resources   *core.PdfDictionary
 	Contents    []byte
+	Rotation    int
 	Fonts       map[string]int // font name -> object number
 	FontEntries map[string]layout.FontEntry
 	Images      map[string]layout.ImageEntry

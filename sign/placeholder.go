@@ -75,7 +75,16 @@ func PreparePDF(pdf []byte, opts Options) (prepared []byte, byteRange [4]int, co
 	// Find existing trailer size.
 	trailerSize := maxObj + 2 // rough estimate
 	prevXref := findStartXref(pdf)
-	buf.WriteString(fmt.Sprintf("<< /Size %d /Prev %d >>\n", trailerSize, prevXref))
+	buf.WriteString(fmt.Sprintf("<< /Size %d /Prev %d", trailerSize, prevXref))
+	if root := findTrailerRef(pdf, "/Root"); root != "" {
+		buf.WriteString(" /Root ")
+		buf.WriteString(root)
+	}
+	if info := findTrailerRef(pdf, "/Info"); info != "" {
+		buf.WriteString(" /Info ")
+		buf.WriteString(info)
+	}
+	buf.WriteString(" >>\n")
 	buf.WriteString("startxref\n")
 	buf.WriteString(fmt.Sprintf("%d\n", xrefOffset))
 	buf.WriteString("%%EOF\n")
@@ -91,6 +100,41 @@ func PreparePDF(pdf []byte, opts Options) (prepared []byte, byteRange [4]int, co
 	}
 
 	return
+}
+
+func findTrailerRef(pdf []byte, key string) string {
+	idx := bytes.LastIndex(pdf, []byte(key))
+	if idx < 0 {
+		return ""
+	}
+	i := idx + len(key)
+	for i < len(pdf) && (pdf[i] == ' ' || pdf[i] == '\n' || pdf[i] == '\r' || pdf[i] == '\t') {
+		i++
+	}
+	start := i
+	for i < len(pdf) && pdf[i] >= '0' && pdf[i] <= '9' {
+		i++
+	}
+	if i == start {
+		return ""
+	}
+	for i < len(pdf) && (pdf[i] == ' ' || pdf[i] == '\n' || pdf[i] == '\r' || pdf[i] == '\t') {
+		i++
+	}
+	genStart := i
+	for i < len(pdf) && pdf[i] >= '0' && pdf[i] <= '9' {
+		i++
+	}
+	if i == genStart {
+		return ""
+	}
+	for i < len(pdf) && (pdf[i] == ' ' || pdf[i] == '\n' || pdf[i] == '\r' || pdf[i] == '\t') {
+		i++
+	}
+	if i >= len(pdf) || pdf[i] != 'R' {
+		return ""
+	}
+	return strings.TrimSpace(string(pdf[start : i+1]))
 }
 
 func buildSigDict(objNum int, opts Options) string {

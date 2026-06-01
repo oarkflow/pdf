@@ -71,7 +71,26 @@ CLI conversion:
 ```sh
 pdf text -o output.txt input.pdf
 pdf to-html -o output.html -mode positioned -pages 1-3 input.pdf
+pdf to-markdown -o output.md input.pdf
+pdf to-json -o output.json input.pdf
 pdf text -prompt-password -o protected.txt protected.pdf
+```
+
+Common document operations:
+
+```sh
+pdf info input.pdf
+pdf split -pages 1-3 -o first-pages.pdf input.pdf
+pdf delete-pages -pages 2,4 -o trimmed.pdf input.pdf
+pdf reorder -pages 3,1,2 -o reordered.pdf input.pdf
+pdf rotate -degrees 90 -pages 1 -o rotated.pdf input.pdf
+pdf protect -user-password secret -o protected.pdf input.pdf
+pdf decrypt -prompt-password -o unlocked.pdf protected.pdf
+pdf watermark -text DRAFT -o draft.pdf input.pdf
+pdf page-numbers -o numbered.pdf input.pdf
+pdf set-metadata -title "Quarterly Report" -author "Acme" -o tagged.pdf input.pdf
+pdf sign -key key.pem -cert cert.pem -reason Approved -o signed.pdf input.pdf
+pdf extract-images -o images input.pdf
 ```
 
 ## HTML To PDF Support

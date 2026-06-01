@@ -244,6 +244,9 @@ func (sw *StreamingWriter) AddPage(page *Page) (int, error) {
 	})
 	pageDict.Set("Contents", core.PdfIndirectReference{ObjectNumber: contentsNum})
 	pageDict.Set("Resources", res)
+	if page.Rotation != 0 {
+		pageDict.Set("Rotate", core.PdfInteger(int64(page.Rotation)))
+	}
 
 	// Add link annotations
 	if len(page.Annotations) > 0 {

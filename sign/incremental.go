@@ -12,7 +12,7 @@ func AppendSignature(original []byte, sig []byte, byteRange [4]int, contentsOffs
 	if byteRange[0] != 0 {
 		return nil, fmt.Errorf("incremental: byte range must start at 0")
 	}
-	if byteRange[1]+byteRange[3]+byteRange[2] > len(original) {
+	if byteRange[1] < 0 || byteRange[2] < byteRange[1] || byteRange[2]+byteRange[3] > len(original) {
 		return nil, fmt.Errorf("incremental: byte range exceeds PDF size")
 	}
 

@@ -12,6 +12,19 @@ import (
 	"github.com/oarkflow/pdf/layout"
 )
 
+// PageOverlay is extra content appended to a copied page.
+type PageOverlay func(pageIndex int, page *document.Page) []byte
+
+// CopyOptions controls page copying operations.
+type CopyOptions struct {
+	Pages      []int
+	Password   string
+	Encryption *core.EncryptionConfig
+	Info       map[string]string
+	Rotate     map[int]int
+	Overlay    PageOverlay
+}
+
 // Merge combines multiple PDF byte slices into a single PDF.
 func Merge(pdfs [][]byte) ([]byte, error) {
 	if len(pdfs) == 0 {
@@ -73,11 +86,103 @@ func MergeFiles(paths []string, outputPath string) error {
 	return os.WriteFile(outputPath, merged, 0644)
 }
 
+// ExtractPages copies selected 0-based pages from one PDF into a new PDF.
+func ExtractPages(pdfData []byte, pages []int, password string) ([]byte, error) {
+	return CopyPages(pdfData, CopyOptions{Pages: pages, Password: password})
+}
+
+// CopyPages copies selected 0-based pages into a new PDF, optionally modifying
+// rotation, appending page overlays, and applying output encryption.
+func CopyPages(pdfData []byte, opts CopyOptions) ([]byte, error) {
+	reader, err := OpenWithPassword(pdfData, opts.Password)
+	if err != nil {
+		return nil, err
+	}
+	pages := opts.Pages
+	if len(pages) == 0 {
+		pages = make([]int, reader.NumPages())
+		for i := range pages {
+			pages[i] = i
+		}
+	}
+
+	w := document.NewWriter()
+
+	for _, pageNum := range pages {
+		if pageNum < 0 || pageNum >= reader.NumPages() {
+			return nil, fmt.Errorf("page %d out of range [1, %d]", pageNum+1, reader.NumPages())
+		}
+		page, err := reader.Page(pageNum)
+		if err != nil {
+			return nil, fmt.Errorf("reading page %d: %w", pageNum+1, err)
+		}
+		suffix := fmt.Sprintf("_p%d", pageNum+1)
+		newPage, fontObjNums, imageObjNums, err := buildMergePage(w, page, suffix, reader)
+		if err != nil {
+			return nil, fmt.Errorf("building page %d: %w", pageNum+1, err)
+		}
+		newPage.Fonts = fontObjNums
+		newPage.Images = imageObjNums
+		newPage.Rotation = normalizeRotation(page.Rotation)
+		if rotate, ok := opts.Rotate[pageNum]; ok {
+			newPage.Rotation = normalizeRotation(rotate)
+		}
+		if opts.Overlay != nil {
+			newPage.Contents = append(newPage.Contents, opts.Overlay(pageNum, newPage)...)
+		}
+		if _, err := w.AddPage(newPage); err != nil {
+			return nil, fmt.Errorf("adding page %d: %w", pageNum+1, err)
+		}
+	}
+
+	if opts.Encryption != nil {
+		if err := document.ApplyEncryption(w, *opts.Encryption); err != nil {
+			return nil, err
+		}
+	}
+	if len(opts.Info) > 0 {
+		w.SetInfo(opts.Info)
+	}
+
+	var buf bytes.Buffer
+	if _, err := w.WriteTo(&buf); err != nil {
+		return nil, fmt.Errorf("writing extracted PDF: %w", err)
+	}
+	return buf.Bytes(), nil
+}
+
+// ExtractPagesFile copies selected pages from inputPath into outputPath.
+func ExtractPagesFile(inputPath, outputPath string, pages []int, password string) error {
+	data, err := os.ReadFile(inputPath)
+	if err != nil {
+		return fmt.Errorf("reading %s: %w", inputPath, err)
+	}
+	extracted, err := ExtractPages(data, pages, password)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(outputPath, extracted, 0644)
+}
+
+// CopyPagesFile copies pages from inputPath to outputPath with the given options.
+func CopyPagesFile(inputPath, outputPath string, opts CopyOptions) error {
+	data, err := os.ReadFile(inputPath)
+	if err != nil {
+		return fmt.Errorf("reading %s: %w", inputPath, err)
+	}
+	out, err := CopyPages(data, opts)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(outputPath, out, 0644)
+}
+
 func buildMergePage(w *document.Writer, page *PageInfo, suffix string, reader *Reader) (*document.Page, map[string]int, map[string]layout.ImageEntry, error) {
 	newPage := document.NewPage(document.PageSize{
 		Width:  page.MediaBox[2] - page.MediaBox[0],
 		Height: page.MediaBox[3] - page.MediaBox[1],
 	})
+	newPage.Rotation = normalizeRotation(page.Rotation)
 
 	// Rewrite content stream to rename font/image references.
 	contents := rewriteResourceNames(page.Contents, suffix)
@@ -151,6 +256,19 @@ func buildMergePage(w *document.Writer, page *PageInfo, suffix string, reader *R
 	}
 
 	return newPage, fontObjNums, imageObjNums, nil
+}
+
+func normalizeRotation(rotation int) int {
+	rotation %= 360
+	if rotation < 0 {
+		rotation += 360
+	}
+	switch rotation {
+	case 90, 180, 270:
+		return rotation
+	default:
+		return 0
+	}
 }
 
 // rewriteResourceNames appends suffix to font and image name references in a content stream.

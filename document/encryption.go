@@ -9,7 +9,11 @@ import (
 
 // applyEncryption adds encryption objects to the writer.
 func (d *Document) applyEncryption(w *Writer) error {
-	cfg := *d.encConfig
+	return ApplyEncryption(w, *d.encConfig)
+}
+
+// ApplyEncryption configures a Writer to encrypt its output.
+func ApplyEncryption(w *Writer, cfg core.EncryptionConfig) error {
 	if cfg.Algorithm == core.AES_256 {
 		return fmt.Errorf("AES-256 PDF encryption is not supported yet; use AES-128")
 	}
