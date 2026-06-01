@@ -31,10 +31,10 @@ type ExtractedLink struct {
 
 // TableCell represents a detected table cell.
 type TableCell struct {
-	Row, Col           int
-	RowSpan, ColSpan   int
-	Spans              []StyledSpan
-	Text               string
+	Row, Col         int
+	RowSpan, ColSpan int
+	Spans            []StyledSpan
+	Text             string
 }
 
 // DetectedTable is a table found via position heuristics.
@@ -62,14 +62,14 @@ type Paragraph struct {
 
 // PageResult holds everything extracted from one PDF page.
 type PageResult struct {
-	PageNum   int
-	Width     float64
-	Height    float64
-	Lines     []Line
+	PageNum    int
+	Width      float64
+	Height     float64
+	Lines      []Line
 	Paragraphs []Paragraph
-	Images    []ExtractedImage
-	Links     []ExtractedLink
-	Tables    []DetectedTable
+	Images     []ExtractedImage
+	Links      []ExtractedLink
+	Tables     []DetectedTable
 }
 
 // ConvertOptions controls conversion behavior.
@@ -84,6 +84,7 @@ type ConvertOptions struct {
 // ConvertResult is the final output of a PDF-to-HTML conversion.
 type ConvertResult struct {
 	HTML     string
+	Text     string
 	Pages    []PageResult
 	Metadata map[string]string
 }

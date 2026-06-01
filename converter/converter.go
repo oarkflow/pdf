@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 
 	"github.com/oarkflow/pdf/reader"
 )
@@ -68,14 +69,10 @@ func (c *Converter) Metadata() map[string]string {
 
 // Convert performs the full PDF-to-HTML conversion.
 func (c *Converter) Convert() (*ConvertResult, error) {
-	pages := c.options.Pages
-	if pages == nil {
-		pages = make([]int, c.reader.NumPages())
-		for i := range pages {
-			pages[i] = i
-		}
+	pages := c.pageNumbers()
+	if err := c.validatePageNumbers(pages); err != nil {
+		return nil, err
 	}
-
 	totalPages := len(pages)
 	result := &ConvertResult{
 		Pages:    make([]PageResult, 0, totalPages),
@@ -103,8 +100,50 @@ func (c *Converter) Convert() (*ConvertResult, error) {
 	// Generate HTML from all pages.
 	builder := newHTMLBuilder(c.options.Mode)
 	result.HTML = builder.Build(result.Pages, result.Metadata)
+	result.Text = BuildText(result.Pages)
 
 	return result, nil
+}
+
+// ConvertText extracts plain text from the selected pages.
+func (c *Converter) ConvertText() (string, error) {
+	pages := c.pageNumbers()
+	if err := c.validatePageNumbers(pages); err != nil {
+		return "", err
+	}
+	results := make([]PageResult, 0, len(pages))
+	for _, pageNum := range pages {
+		if c.onProgress != nil {
+			c.onProgress(pageNum, len(pages))
+		}
+		pageResult, err := c.ConvertPage(pageNum)
+		if err != nil {
+			results = append(results, PageResult{PageNum: pageNum})
+			continue
+		}
+		results = append(results, *pageResult)
+	}
+	return BuildText(results), nil
+}
+
+func (c *Converter) pageNumbers() []int {
+	if c.options.Pages != nil {
+		return c.options.Pages
+	}
+	pages := make([]int, c.reader.NumPages())
+	for i := range pages {
+		pages[i] = i
+	}
+	return pages
+}
+
+func (c *Converter) validatePageNumbers(pages []int) error {
+	for _, pageNum := range pages {
+		if pageNum < 0 || pageNum >= c.reader.NumPages() {
+			return fmt.Errorf("page %d out of range [1, %d]", pageNum+1, c.reader.NumPages())
+		}
+	}
+	return nil
 }
 
 // ConvertPage converts a single PDF page.
@@ -321,4 +360,83 @@ func groupParagraphs(lines []Line) []Paragraph {
 	}
 
 	return paragraphs
+}
+
+// BuildText converts extracted page results to plain text in reconstructed reading order.
+func BuildText(pages []PageResult) string {
+	var doc strings.Builder
+	for i, page := range pages {
+		if i > 0 {
+			doc.WriteString("\n\n")
+		}
+		doc.WriteString(BuildPageText(page))
+	}
+	return strings.TrimRight(doc.String(), "\n")
+}
+
+// BuildPageText converts one extracted page to plain text.
+func BuildPageText(page PageResult) string {
+	var out strings.Builder
+	prevY := 0.0
+	prevFontSize := 12.0
+	wroteLine := false
+
+	for _, line := range page.Lines {
+		if len(line.Spans) == 0 {
+			continue
+		}
+		if wroteLine {
+			fontSize := avgFontSize(line.Spans)
+			if fontSize == 0 {
+				fontSize = prevFontSize
+			}
+			yGap := math.Abs(prevY - line.Y)
+			lineHeight := math.Max(fontSize, prevFontSize) * 1.2
+			out.WriteByte('\n')
+			if yGap > lineHeight*1.7 {
+				out.WriteByte('\n')
+			}
+		}
+		writeLineText(&out, line.Spans)
+		prevY = line.Y
+		prevFontSize = avgFontSize(line.Spans)
+		if prevFontSize == 0 {
+			prevFontSize = 12
+		}
+		wroteLine = true
+	}
+
+	return strings.TrimRight(out.String(), "\n")
+}
+
+func writeLineText(out *strings.Builder, spans []StyledSpan) {
+	wrote := false
+	var prev StyledSpan
+	for _, span := range spans {
+		text := strings.TrimSpace(span.Text)
+		if text == "" {
+			continue
+		}
+		if wrote && needsPlainTextGap(prev, span) {
+			out.WriteByte(' ')
+		}
+		out.WriteString(text)
+		prev = span
+		wrote = true
+	}
+}
+
+func needsPlainTextGap(prev, cur StyledSpan) bool {
+	if strings.HasSuffix(prev.Text, " ") || strings.HasPrefix(cur.Text, " ") {
+		return false
+	}
+	xGap := cur.X - (prev.X + prev.Width)
+	avgCharW := cur.FontSize * 0.35
+	if avgCharW <= 0 {
+		avgCharW = 3
+	}
+	if prev.Width == 0 {
+		xGap = cur.X - prev.X - float64(len([]rune(prev.Text)))*avgCharW
+	}
+	return xGap > avgCharW
 }

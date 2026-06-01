@@ -55,6 +55,25 @@ var out bytes.Buffer
 err := pdf.FromHTMLStreaming("<p>Hello</p>", &out)
 ```
 
+Convert a PDF to text or HTML:
+
+```go
+text, err := pdf.ToText("input.pdf")
+html, err := pdf.ToHTML("input.pdf", converter.ConvertOptions{
+	Mode:          "reflowed",
+	ExtractImages: true,
+	DetectTables:  true,
+})
+```
+
+CLI conversion:
+
+```sh
+pdf text -o output.txt input.pdf
+pdf to-html -o output.html -mode positioned -pages 1-3 input.pdf
+pdf text -prompt-password -o protected.txt protected.pdf
+```
+
 ## HTML To PDF Support
 
 The renderer supports a practical subset of HTML/CSS:
@@ -102,7 +121,7 @@ Known limitations:
 
 - `examples/html_invoice` renders a styled invoice, protected invoice, Tailwind newsletter-style document, and a Devanagari letter.
 - `examples/template` demonstrates template-driven documents.
-- `cmd/pdftohtml` provides a local PDF-to-HTML inspection UI.
+- `cmd/pdftohtml` provides a local PDF-to-HTML/text inspection UI.
 
 ## Development
 

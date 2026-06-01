@@ -10,7 +10,9 @@
     files: [],        // [{id, filename, pages, metadata, status, element}]
     activeId: null,   // currently selected file id
     mode: 'reflowed',
+    output: 'html',
     htmlSource: '',
+    outputSource: '',
   };
 
   // ---- DOM Refs ----
@@ -30,9 +32,13 @@
     optionsSection:  $('#optionsSection'),
     convertSection:  $('#convertSection'),
     convertBtn:      $('#convertBtn'),
+    convertBtnText:  $('#convertBtnText'),
     progressContainer: $('#progressContainer'),
     progressFill:    $('#progressFill'),
     progressText:    $('#progressText'),
+    outputHTML:      $('#outputHTML'),
+    outputText:      $('#outputText'),
+    renderModeGroup: $('#renderModeGroup'),
     modeReflowed:    $('#modeReflowed'),
     modePositioned:  $('#modePositioned'),
     pageRange:       $('#pageRange'),
@@ -60,6 +66,7 @@
     bindConvert();
     bindToolbar();
     bindClearAll();
+    setOutput(state.output);
   }
 
   // ---- Upload ----
@@ -224,8 +231,21 @@
 
   // ---- Options ----
   function bindOptions() {
+    dom.outputHTML.addEventListener('click', () => setOutput('html'));
+    dom.outputText.addEventListener('click', () => setOutput('text'));
     dom.modeReflowed.addEventListener('click', () => setMode('reflowed'));
     dom.modePositioned.addEventListener('click', () => setMode('positioned'));
+  }
+
+  function setOutput(output) {
+    state.output = output;
+    dom.outputHTML.classList.toggle('active', output === 'html');
+    dom.outputText.classList.toggle('active', output === 'text');
+    dom.renderModeGroup.style.display = output === 'html' ? '' : 'none';
+    dom.extractImages.closest('.option-group').style.display = output === 'html' ? '' : 'none';
+    dom.detectTables.closest('.option-group').style.display = output === 'html' ? '' : 'none';
+    dom.convertBtnText.textContent = output === 'html' ? 'Convert to HTML' : 'Convert to Text';
+    dom.tabPreview.style.display = output === 'html' ? '' : 'none';
   }
 
   function setMode(mode) {
@@ -279,6 +299,7 @@
     dom.progressText.textContent = 'Starting conversion…';
 
     file.status = 'converting';
+    file.output = state.output;
     renderFileList();
 
     try {
@@ -288,6 +309,7 @@
         body: JSON.stringify({
           id,
           pages,
+          output: state.output,
           mode: state.mode,
           extractImages: dom.extractImages.checked,
           detectTables: dom.detectTables.checked,
@@ -359,19 +381,28 @@
     dom.resultView.style.display = '';
 
     try {
+      const file = state.files.find(f => f.id === id);
+      const resultOutput = file?.output || state.output;
       const res = await fetch(`/api/preview/${id}`);
-      const html = await res.text();
-      state.htmlSource = html;
+      const output = await res.text();
+      state.htmlSource = output;
+      state.outputSource = output;
+
+      if (resultOutput === 'text') {
+        dom.sourceCode.textContent = output;
+        switchTab('source');
+        return;
+      }
 
       // Write to iframe.
       const frame = dom.previewFrame;
       const doc = frame.contentDocument || frame.contentWindow.document;
       doc.open();
-      doc.write(html);
+      doc.write(output);
       doc.close();
 
       // Source tab.
-      dom.sourceCode.textContent = html;
+      dom.sourceCode.textContent = output;
 
       // Show preview tab by default.
       switchTab('preview');
@@ -389,6 +420,8 @@
   }
 
   function switchTab(tab) {
+    const file = state.files.find(f => f.id === state.activeId);
+    if ((file?.output || state.output) === 'text') tab = 'source';
     dom.tabPreview.classList.toggle('active', tab === 'preview');
     dom.tabSource.classList.toggle('active', tab === 'source');
     dom.previewPanel.style.display = tab === 'preview' ? '' : 'none';
@@ -396,10 +429,12 @@
   }
 
   async function copyHTML() {
-    if (!state.htmlSource) return;
+    if (!state.outputSource) return;
     try {
-      await navigator.clipboard.writeText(state.htmlSource);
-      toast('HTML copied to clipboard', 'success');
+      await navigator.clipboard.writeText(state.outputSource);
+      const file = state.files.find(f => f.id === state.activeId);
+      const kind = (file?.output || state.output) === 'html' ? 'HTML' : 'Text';
+      toast(`${kind} copied to clipboard`, 'success');
     } catch {
       toast('Failed to copy', 'error');
     }

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/oarkflow/pdf/converter"
 	"github.com/oarkflow/pdf/core"
 	"github.com/oarkflow/pdf/document"
 	"github.com/oarkflow/pdf/html"
@@ -119,6 +120,42 @@ func FromHTML(htmlContent string, outputPath string, opts ...html.Options) error
 	}
 
 	return doc.Save(outputPath)
+}
+
+// ToHTML converts a PDF file to an HTML document.
+func ToHTML(inputPath string, opts ...converter.ConvertOptions) (string, error) {
+	if inputPath == "" {
+		return "", errors.New("pdf: input path is empty")
+	}
+	var opt converter.ConvertOptions
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
+	conv, err := converter.NewFromFile(inputPath, opt)
+	if err != nil {
+		return "", err
+	}
+	result, err := conv.Convert()
+	if err != nil {
+		return "", err
+	}
+	return result.HTML, nil
+}
+
+// ToText converts a PDF file to plain text.
+func ToText(inputPath string, opts ...converter.ConvertOptions) (string, error) {
+	if inputPath == "" {
+		return "", errors.New("pdf: input path is empty")
+	}
+	var opt converter.ConvertOptions
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
+	conv, err := converter.NewFromFile(inputPath, opt)
+	if err != nil {
+		return "", err
+	}
+	return conv.ConvertText()
 }
 
 // Merge merges multiple PDF files into a single output file.

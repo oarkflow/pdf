@@ -2,10 +2,14 @@ package pdf
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/oarkflow/pdf/converter"
 	"github.com/oarkflow/pdf/core"
+	"github.com/oarkflow/pdf/document"
 	"github.com/oarkflow/pdf/html"
 )
 
@@ -43,4 +47,47 @@ func TestFromHTMLStreamingSkipsUnsupportedTailwindShadow(t *testing.T) {
 	if strings.Contains(pdfData, "/ExtGState") {
 		t.Fatal("expected unsupported blurred shadow to be omitted")
 	}
+}
+
+func TestToTextAndToHTML(t *testing.T) {
+	path := writeSimpleReadablePDF(t)
+
+	text, err := ToText(path)
+	if err != nil {
+		t.Fatalf("ToText() error = %v", err)
+	}
+	if !strings.Contains(text, "Hello PDF") || !strings.Contains(text, "Second line") {
+		t.Fatalf("text = %q, want extracted lines", text)
+	}
+
+	htmlOut, err := ToHTML(path, converter.ConvertOptions{Mode: "positioned"})
+	if err != nil {
+		t.Fatalf("ToHTML() error = %v", err)
+	}
+	if !strings.Contains(htmlOut, "<!DOCTYPE html>") {
+		t.Fatal("expected HTML doctype")
+	}
+	if !strings.Contains(htmlOut, "Hello PDF") {
+		t.Fatal("expected converted text in HTML")
+	}
+}
+
+func writeSimpleReadablePDF(t *testing.T) string {
+	t.Helper()
+	doc, err := document.NewDocument(document.A4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := doc.NewPage()
+	p.Contents = []byte("BT /F1 12 Tf 72 760 Td (Hello PDF) Tj 0 -18 Td (Second line) Tj ET")
+
+	path := filepath.Join(t.TempDir(), "sample.pdf")
+	var buf bytes.Buffer
+	if _, err := doc.WriteTo(&buf); err != nil {
+		t.Fatalf("WriteTo: %v", err)
+	}
+	if err := os.WriteFile(path, buf.Bytes(), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	return path
 }

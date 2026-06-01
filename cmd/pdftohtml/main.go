@@ -28,6 +28,7 @@ type Job struct {
 	Metadata  map[string]string
 	Options   converter.ConvertOptions
 	Result    *converter.ConvertResult
+	Output    string
 	Status    string // "uploaded", "converting", "done", "error"
 	Progress  int    // current page being processed
 	Total     int    // total pages to convert
@@ -148,6 +149,7 @@ func handleConvert(w http.ResponseWriter, r *http.Request) {
 		ID            string `json:"id"`
 		Pages         []int  `json:"pages"`
 		Mode          string `json:"mode"`
+		Output        string `json:"output"`
 		ExtractImages bool   `json:"extractImages"`
 		DetectTables  bool   `json:"detectTables"`
 	}
@@ -168,12 +170,21 @@ func handleConvert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.Output == "" {
+		req.Output = "html"
+	}
+	if req.Output != "html" && req.Output != "text" {
+		jsonError(w, "Invalid output type", http.StatusBadRequest)
+		return
+	}
+
 	job.Options = converter.ConvertOptions{
 		Pages:         req.Pages,
 		Mode:          req.Mode,
 		ExtractImages: req.ExtractImages,
 		DetectTables:  req.DetectTables,
 	}
+	job.Output = req.Output
 
 	job.Status = "converting"
 	job.Progress = 0
@@ -197,11 +208,22 @@ func handleConvert(w http.ResponseWriter, r *http.Request) {
 			job.Total = total
 		})
 
-		result, err := conv.Convert()
-		if err != nil {
-			job.Status = "error"
-			job.Error = err.Error()
-			return
+		var result *converter.ConvertResult
+		if job.Output == "text" {
+			text, err := conv.ConvertText()
+			if err != nil {
+				job.Status = "error"
+				job.Error = err.Error()
+				return
+			}
+			result = &converter.ConvertResult{Text: text, Metadata: conv.Metadata()}
+		} else {
+			result, err = conv.Convert()
+			if err != nil {
+				job.Status = "error"
+				job.Error = err.Error()
+				return
+			}
 		}
 
 		job.Result = result
@@ -248,6 +270,12 @@ func handlePreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if job.Output == "text" {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Write([]byte(job.Result.Text))
+		return
+	}
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(job.Result.HTML))
 }
@@ -270,6 +298,14 @@ func handleDownload(w http.ResponseWriter, r *http.Request) {
 	if len(filename) > 4 && filename[len(filename)-4:] == ".pdf" {
 		filename = filename[:len(filename)-4]
 	}
+	if job.Output == "text" {
+		filename += ".txt"
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
+		w.Write([]byte(job.Result.Text))
+		return
+	}
+
 	filename += ".html"
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

@@ -8,12 +8,16 @@ require (
 	golang.org/x/net v0.54.0
 )
 
-require github.com/oarkflow/fasttpl v0.0.3
+require (
+	github.com/go-text/typesetting v0.3.4
+	github.com/oarkflow/fasttpl v0.0.3
+	golang.org/x/term v0.43.0
+)
 
 require (
 	github.com/dlclark/regexp2 v1.12.0 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.4+incompatible // indirect
-	github.com/go-text/typesetting v0.3.4 // indirect
 	github.com/google/pprof v0.0.0-20260507013755-92041b743c96 // indirect
+	golang.org/x/sys v0.44.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
 )
