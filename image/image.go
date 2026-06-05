@@ -172,6 +172,14 @@ func Load(data []byte) (*Image, error) {
 	if data[0] == 'R' && data[1] == 'I' && data[2] == 'F' && data[3] == 'F' && len(data) > 11 && data[8] == 'W' && data[9] == 'E' && data[10] == 'B' && data[11] == 'P' {
 		return LoadWebP(data)
 	}
+	// GIF: decode the first frame through the standard image registry.
+	if data[0] == 'G' && data[1] == 'I' && data[2] == 'F' {
+		img, _, err := goimage.Decode(bytes.NewReader(data))
+		if err != nil {
+			return nil, fmt.Errorf("gif: %w", err)
+		}
+		return FromGoImage(img), nil
+	}
 	return nil, fmt.Errorf("unsupported image format")
 }
 

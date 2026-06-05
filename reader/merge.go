@@ -34,29 +34,8 @@ func Merge(pdfs [][]byte) ([]byte, error) {
 	w := document.NewWriter()
 
 	for docIdx, pdfData := range pdfs {
-		reader, err := Open(pdfData)
-		if err != nil {
-			return nil, fmt.Errorf("opening PDF %d: %w", docIdx, err)
-		}
-
-		for pageNum := 0; pageNum < reader.NumPages(); pageNum++ {
-			page, err := reader.Page(pageNum)
-			if err != nil {
-				return nil, fmt.Errorf("reading page %d of PDF %d: %w", pageNum, docIdx, err)
-			}
-
-			suffix := fmt.Sprintf("_doc%d", docIdx)
-			newPage, fontObjNums, imageObjNums, err := buildMergePage(w, page, suffix, reader)
-			if err != nil {
-				return nil, fmt.Errorf("building merge page %d of PDF %d: %w", pageNum, docIdx, err)
-			}
-
-			newPage.Fonts = fontObjNums
-			newPage.Images = imageObjNums
-
-			if _, err := w.AddPage(newPage); err != nil {
-				return nil, fmt.Errorf("adding page %d of PDF %d: %w", pageNum, docIdx, err)
-			}
+		if err := AppendPDF(w, pdfData, fmt.Sprintf("doc%d", docIdx)); err != nil {
+			return nil, err
 		}
 	}
 
@@ -65,6 +44,38 @@ func Merge(pdfs [][]byte) ([]byte, error) {
 		return nil, fmt.Errorf("writing merged PDF: %w", err)
 	}
 	return buf.Bytes(), nil
+}
+
+// AppendPDF copies every page from pdfData into w.
+func AppendPDF(w *document.Writer, pdfData []byte, suffixBase string) error {
+	if w == nil {
+		return fmt.Errorf("reader: writer is nil")
+	}
+	reader, err := Open(pdfData)
+	if err != nil {
+		return fmt.Errorf("opening PDF %s: %w", suffixBase, err)
+	}
+
+	for pageNum := 0; pageNum < reader.NumPages(); pageNum++ {
+		page, err := reader.Page(pageNum)
+		if err != nil {
+			return fmt.Errorf("reading page %d of PDF %s: %w", pageNum, suffixBase, err)
+		}
+
+		suffix := fmt.Sprintf("_%s_p%d", suffixBase, pageNum+1)
+		newPage, fontObjNums, imageObjNums, err := buildMergePage(w, page, suffix, reader)
+		if err != nil {
+			return fmt.Errorf("building merge page %d of PDF %s: %w", pageNum, suffixBase, err)
+		}
+
+		newPage.Fonts = fontObjNums
+		newPage.Images = imageObjNums
+
+		if _, err := w.AddPage(newPage); err != nil {
+			return fmt.Errorf("adding page %d of PDF %s: %w", pageNum, suffixBase, err)
+		}
+	}
+	return nil
 }
 
 // MergeFiles merges PDF files at the given paths into outputPath.
@@ -184,34 +195,36 @@ func buildMergePage(w *document.Writer, page *PageInfo, suffix string, reader *R
 	})
 	newPage.Rotation = normalizeRotation(page.Rotation)
 
-	// Rewrite content stream to rename font/image references.
-	contents := rewriteResourceNames(page.Contents, suffix)
-	newPage.Contents = contents
-
 	fontObjNums := make(map[string]int)
 	imageObjNums := make(map[string]layout.ImageEntry)
+	renames := make(map[string]string)
+	copied := make(map[int]int)
+
+	for key, value := range page.Resources {
+		switch key {
+		case "/Font", "/XObject":
+			continue
+		}
+		newPage.Resources.Set(strings.TrimPrefix(key, "/"), copyPDFObject(w, reader.resolver, value, copied))
+	}
 
 	// Add fonts from resources.
 	if fontRes, ok := page.Resources["/Font"]; ok {
 		fontMap := resolveMap(reader.resolver, fontRes)
 		for name, fontRef := range fontMap {
-			newName := name + suffix
 			// Strip leading / if present.
 			cleanName := name
 			if len(cleanName) > 0 && cleanName[0] == '/' {
 				cleanName = cleanName[1:]
 			}
 			cleanNew := cleanName + suffix
+			renames[cleanName] = cleanNew
 
-			// Create a basic font object.
-			fontDict := resolveMap(reader.resolver, fontRef)
-			if fontDict == nil {
-				continue
+			objNum, err := copyPDFResourceObject(w, reader.resolver, fontRef, copied)
+			if err != nil {
+				return nil, nil, nil, fmt.Errorf("reader: merge: failed to copy font %s: %w", name, err)
 			}
-			coreDict := mapToCoreDictionary(fontDict)
-			objNum := w.AddObject(coreDict)
 			fontObjNums[cleanNew] = objNum
-			_ = newName
 		}
 	}
 
@@ -224,36 +237,18 @@ func buildMergePage(w *document.Writer, page *PageInfo, suffix string, reader *R
 				cleanName = cleanName[1:]
 			}
 			cleanNew := cleanName + suffix
+			renames[cleanName] = cleanNew
 
-			xobj, err := reader.resolver.ResolveReference(xobjRef)
+			objNum, err := copyPDFResourceObject(w, reader.resolver, xobjRef, copied)
 			if err != nil {
-				return nil, nil, nil, fmt.Errorf("reader: merge: failed to resolve XObject %s: %w", name, err)
+				return nil, nil, nil, fmt.Errorf("reader: merge: failed to copy XObject %s: %w", name, err)
 			}
-			if so, ok := xobj.(*StreamObject); ok {
-				data, err := reader.resolver.DecompressStream(so.Dict, so.Data)
-				if err != nil {
-					return nil, nil, nil, fmt.Errorf("reader: merge: failed to decompress XObject %s: %w", name, err)
-				}
-				stream := core.NewStream(data)
-				if err := stream.Compress(); err != nil {
-					return nil, nil, nil, fmt.Errorf("reader: merge: failed to compress XObject %s: %w", name, err)
-				}
-				// Copy relevant dictionary entries.
-				for k, v := range so.Dict {
-					if k == "/Length" || k == "/Filter" {
-						continue
-					}
-					cleanKey := k
-					if len(cleanKey) > 0 && cleanKey[0] == '/' {
-						cleanKey = cleanKey[1:]
-					}
-					stream.Dictionary.Set(cleanKey, convertToCoreObject(v))
-				}
-				objNum := w.AddObject(stream)
-				imageObjNums[cleanNew] = layout.ImageEntry{ObjectNum: objNum}
-			}
+			imageObjNums[cleanNew] = layout.ImageEntry{ObjectNum: objNum}
 		}
 	}
+
+	// Rewrite content stream to rename only copied font/image resource names.
+	newPage.Contents = rewriteResourceNames(page.Contents, renames)
 
 	return newPage, fontObjNums, imageObjNums, nil
 }
@@ -271,9 +266,9 @@ func normalizeRotation(rotation int) int {
 	}
 }
 
-// rewriteResourceNames appends suffix to font and image name references in a content stream.
-func rewriteResourceNames(contents []byte, suffix string) []byte {
-	if len(suffix) == 0 {
+// rewriteResourceNames renames only known font/image resource names in a content stream.
+func rewriteResourceNames(contents []byte, renames map[string]string) []byte {
+	if len(renames) == 0 {
 		return contents
 	}
 
@@ -289,8 +284,11 @@ func rewriteResourceNames(contents []byte, suffix string) []byte {
 		switch t.Type {
 		case TokenName:
 			buf.WriteByte('/')
-			buf.WriteString(t.Value)
-			buf.WriteString(suffix)
+			if renamed, ok := renames[t.Value]; ok {
+				buf.WriteString(renamed)
+			} else {
+				buf.WriteString(t.Value)
+			}
 		case TokenInteger:
 			buf.WriteString(strconv.FormatInt(t.Int, 10))
 		case TokenReal:
@@ -320,6 +318,58 @@ func rewriteResourceNames(contents []byte, suffix string) []byte {
 	}
 
 	return buf.Bytes()
+}
+
+func copyPDFResourceObject(w *document.Writer, resolver *Resolver, value interface{}, copied map[int]int) (int, error) {
+	obj := copyPDFObject(w, resolver, value, copied)
+	ref, ok := obj.(core.PdfIndirectReference)
+	if !ok {
+		return w.AddObject(obj), nil
+	}
+	return ref.ObjectNumber, nil
+}
+
+func copyPDFObject(w *document.Writer, resolver *Resolver, value interface{}, copied map[int]int) core.PdfObject {
+	switch val := value.(type) {
+	case IndirectRef:
+		if objNum, ok := copied[val.ObjNum]; ok {
+			return core.PdfIndirectReference{ObjectNumber: objNum, GenerationNumber: 0}
+		}
+		objNum := w.ReserveObject()
+		copied[val.ObjNum] = objNum
+		resolved, err := resolver.ResolveObject(val.ObjNum)
+		if err != nil {
+			w.FillReserved(objNum, core.PdfNull{})
+			return core.PdfIndirectReference{ObjectNumber: objNum, GenerationNumber: 0}
+		}
+		w.FillReserved(objNum, copyPDFObject(w, resolver, resolved, copied))
+		return core.PdfIndirectReference{ObjectNumber: objNum, GenerationNumber: 0}
+	case *StreamObject:
+		stream := core.NewStream(val.Data)
+		for k, v := range val.Dict {
+			if k == "/Length" {
+				continue
+			}
+			key := strings.TrimPrefix(k, "/")
+			stream.Dictionary.Set(key, copyPDFObject(w, resolver, v, copied))
+		}
+		return stream
+	case map[string]interface{}:
+		d := core.NewDictionary()
+		for k, v := range val {
+			key := strings.TrimPrefix(k, "/")
+			d.Set(key, copyPDFObject(w, resolver, v, copied))
+		}
+		return d
+	case []interface{}:
+		arr := make(core.PdfArray, len(val))
+		for i, item := range val {
+			arr[i] = copyPDFObject(w, resolver, item, copied)
+		}
+		return arr
+	default:
+		return convertToCoreObject(val)
+	}
 }
 
 func escapeStringContent(s string) string {

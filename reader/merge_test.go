@@ -142,3 +142,38 @@ func TestMergeFiles(t *testing.T) {
 		t.Fatalf("expected 2 pages, got %d", r.NumPages())
 	}
 }
+
+func TestMergePreservesPageResources(t *testing.T) {
+	content := "q /GS1 gs 1 0 0 rg 72 72 100 100 re f Q"
+	pdf := "%PDF-1.4\n"
+	pdf += "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"
+	pdf += "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"
+	pdf += "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /ExtGState << /GS1 5 0 R >> >> >>\nendobj\n"
+	pdf += "4 0 obj\n<< /Length " + itoa(len(content)) + " >>\nstream\n" + content + "\nendstream\nendobj\n"
+	pdf += "5 0 obj\n<< /Type /ExtGState /CA 0.5 /ca 0.5 >>\nendobj\n"
+	xrefOff := len(pdf)
+	pdf += "xref\n0 6\n0000000000 65535 f \r\n"
+	pdf += "0000000009 00000 n \r\n"
+	pdf += "0000000058 00000 n \r\n"
+	pdf += "0000000115 00000 n \r\n"
+	pdf += "0000000250 00000 n \r\n"
+	pdf += "0000000350 00000 n \r\n"
+	pdf += "trailer\n<< /Size 6 /Root 1 0 R >>\n"
+	pdf += "startxref\n" + itoa(xrefOff) + "\n%%EOF\n"
+
+	merged, err := Merge([][]byte{[]byte(pdf)})
+	if err != nil {
+		t.Fatalf("Merge failed: %v", err)
+	}
+	r, err := Open(merged)
+	if err != nil {
+		t.Fatalf("Opening merged PDF failed: %v", err)
+	}
+	page, err := r.Page(0)
+	if err != nil {
+		t.Fatalf("reading page: %v", err)
+	}
+	if _, ok := page.Resources["/ExtGState"]; !ok {
+		t.Fatal("merged page lost ExtGState resource")
+	}
+}
