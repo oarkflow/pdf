@@ -18,6 +18,9 @@ type FinancialReportData struct {
 	PageSize   document.PageSize
 	Margins    document.Margins
 	FooterText string
+	PDFA       *document.PDFALevel
+	PDFUA      *document.PDFUALevel
+	Language   string
 	Blocks     []FinancialReportBlock
 }
 
@@ -93,6 +96,9 @@ type CompiledFinancialReport struct {
 	pageSize   document.PageSize
 	margins    document.Margins
 	metadata   document.Metadata
+	pdfa       *document.PDFALevel
+	pdfua      *document.PDFUALevel
+	language   string
 	footerText string
 	sizeHint   int
 }
@@ -154,6 +160,9 @@ func CompileFinancialReport(data FinancialReportData) (*CompiledFinancialReport,
 			Subject: data.Subject,
 			Author:  data.Author,
 		},
+		pdfa:     data.PDFA,
+		pdfua:    data.PDFUA,
+		language: data.Language,
 		sizeHint: estimateFinancialReportSize(docPages),
 	}, nil
 }
@@ -169,6 +178,15 @@ func (c *CompiledFinancialReport) Render() (*document.Document, error) {
 	}
 	doc.SetMargins(c.margins)
 	doc.SetMetadata(c.metadata)
+	if c.pdfa != nil {
+		doc.SetPDFA(*c.pdfa)
+	}
+	if c.pdfua != nil {
+		doc.SetPDFUA(*c.pdfua)
+	}
+	if c.language != "" {
+		doc.SetLanguage(c.language)
+	}
 	for _, p := range c.docPages {
 		doc.AddPage(p)
 	}
@@ -188,6 +206,15 @@ func (c *CompiledFinancialReport) WriteStreamingTo(out io.Writer) error {
 		return err
 	}
 	sw.SetMetadata(c.metadata)
+	if c.pdfa != nil {
+		sw.SetPDFA(*c.pdfa)
+	}
+	if c.pdfua != nil {
+		sw.SetPDFUA(*c.pdfua)
+	}
+	if c.language != "" {
+		sw.SetLanguage(c.language)
+	}
 	for _, page := range c.docPages {
 		if _, err := sw.AddPage(page); err != nil {
 			return err

@@ -39,6 +39,15 @@ type PDFALevel int
 const (
 	PDFA1b PDFALevel = iota
 	PDFA2b
+	PDFA4
+)
+
+// PDFUALevel indicates the PDF/UA conformance level.
+type PDFUALevel int
+
+const (
+	PDFUA1 PDFUALevel = iota
+	PDFUA2
 )
 
 // Document is the high-level API for building a PDF.
@@ -53,6 +62,8 @@ type Document struct {
 	footer     PageDecorator
 	watermark  *WatermarkConfig
 	pdfaLevel  *PDFALevel
+	pdfuaLevel *PDFUALevel
+	language   string
 	encConfig  *core.EncryptionConfig
 	outline    *Outline
 	tagged     bool
@@ -85,10 +96,20 @@ func (d *Document) SetEncryption(cfg core.EncryptionConfig) { d.encConfig = &cfg
 func (d *Document) Pages() []*Page                          { return d.pages }
 func (d *Document) PageSize() PageSize                      { return d.pageSize }
 func (d *Document) Margins() Margins                        { return d.margins }
+func (d *Document) SetLanguage(lang string)                 { d.language = lang }
 
 // SetPDFA sets the target PDF/A conformance level.
 func (d *Document) SetPDFA(level PDFALevel) {
 	d.pdfaLevel = &level
+}
+
+// SetPDFUA sets the target PDF/UA conformance level and enables tagging.
+func (d *Document) SetPDFUA(level PDFUALevel) {
+	d.pdfuaLevel = &level
+	d.EnableTagging()
+	if d.language == "" {
+		d.language = "en-US"
+	}
 }
 
 // SetOutline sets the document outline (bookmarks).
@@ -201,9 +222,9 @@ func (d *Document) WriteTo(w io.Writer) (int64, error) {
 		}
 	}
 
-	// PDF/A objects.
-	if d.pdfaLevel != nil {
-		if err := d.buildPDFAObjects(wr); err != nil {
+	// Compliance objects.
+	if d.pdfaLevel != nil || d.pdfuaLevel != nil {
+		if err := d.buildComplianceObjects(wr); err != nil {
 			return 0, err
 		}
 	}
@@ -222,6 +243,12 @@ func (d *Document) WriteTo(w io.Writer) (int64, error) {
 		if rootObjNum > 0 {
 			wr.SetStructTreeRoot(rootObjNum)
 		}
+	}
+	if d.language != "" {
+		wr.SetLanguage(d.language)
+	}
+	if d.pdfuaLevel != nil {
+		wr.SetDisplayDocTitle(true)
 	}
 
 	// Encryption.
@@ -247,27 +274,15 @@ func (d *Document) WriteStreamingTo(w io.Writer) error {
 		return err
 	}
 
-	info := make(map[string]string)
-	if d.metadata.Title != "" {
-		info["Title"] = d.metadata.Title
+	sw.SetMetadata(d.metadata)
+	if d.pdfaLevel != nil {
+		sw.SetPDFA(*d.pdfaLevel)
 	}
-	if d.metadata.Author != "" {
-		info["Author"] = d.metadata.Author
+	if d.pdfuaLevel != nil {
+		sw.SetPDFUA(*d.pdfuaLevel)
 	}
-	if d.metadata.Subject != "" {
-		info["Subject"] = d.metadata.Subject
-	}
-	if d.metadata.Keywords != "" {
-		info["Keywords"] = d.metadata.Keywords
-	}
-	if d.metadata.Creator != "" {
-		info["Creator"] = d.metadata.Creator
-	}
-	if d.metadata.Producer != "" {
-		info["Producer"] = d.metadata.Producer
-	}
-	if len(info) > 0 {
-		sw.SetInfo(info)
+	if d.language != "" {
+		sw.SetLanguage(d.language)
 	}
 
 	total := len(d.pages)

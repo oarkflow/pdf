@@ -44,6 +44,51 @@ func TestPDFA2b_XMPContainsPart2(t *testing.T) {
 	}
 }
 
+func TestPDFA4_XMPContainsPart4Revision(t *testing.T) {
+	doc, _ := NewDocument(A4)
+	doc.SetMetadata(Metadata{Title: "PDF/A-4 Test"})
+	doc.SetPDFA(PDFA4)
+	doc.NewPage()
+
+	var buf bytes.Buffer
+	if _, err := doc.WriteTo(&buf); err != nil {
+		t.Fatal(err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "<pdfaid:part>4</pdfaid:part>") {
+		t.Error("expected pdfaid:part=4 in XMP metadata")
+	}
+	if !strings.Contains(out, "<pdfaid:rev>2020</pdfaid:rev>") {
+		t.Error("expected pdfaid:rev=2020 in XMP metadata")
+	}
+}
+
+func TestPDFUA2_XMPAndCatalogMarkers(t *testing.T) {
+	doc, _ := NewDocument(A4)
+	doc.SetMetadata(Metadata{Title: "PDF/UA-2 Test"})
+	doc.SetPDFUA(PDFUA2)
+	doc.NewPage()
+
+	var buf bytes.Buffer
+	if _, err := doc.WriteTo(&buf); err != nil {
+		t.Fatal(err)
+	}
+
+	out := buf.String()
+	for _, want := range []string{
+		"<pdfuaid:part>2</pdfuaid:part>",
+		"/MarkInfo",
+		"/StructTreeRoot",
+		"/Lang (en-US)",
+		"/ViewerPreferences",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q", want)
+		}
+	}
+}
+
 func TestPDFA_OutputIntents(t *testing.T) {
 	doc, _ := NewDocument(A4)
 	doc.SetPDFA(PDFA1b)

@@ -1,9 +1,11 @@
 package document
 
 import (
+	"crypto/md5"
 	"fmt"
 	"io"
 	"strconv"
+	"time"
 
 	"github.com/oarkflow/pdf/core"
 	pdffont "github.com/oarkflow/pdf/font"
@@ -24,7 +26,19 @@ type StreamingWriter struct {
 	pagesObj int
 	fontObjs map[string]int
 	info     *core.PdfDictionary
-	finished bool
+	metadata Metadata
+	pdfa     *PDFALevel
+	pdfua    *PDFUALevel
+	lang     string
+
+	metadataRef    int
+	outputIntents  []int
+	structTreeRoot int
+	markInfo       bool
+	displayTitle   bool
+	docIDPair      [2]core.PdfHexString
+	hasDocID       bool
+	finished       bool
 }
 
 func (sw *StreamingWriter) writeInt(v int) error {
@@ -326,6 +340,7 @@ func (sw *StreamingWriter) SetInfo(info map[string]string) {
 
 // SetMetadata sets document metadata without requiring callers to allocate a map.
 func (sw *StreamingWriter) SetMetadata(meta Metadata) {
+	sw.metadata = meta
 	count := 0
 	if meta.Title != "" {
 		count++
@@ -371,6 +386,112 @@ func (sw *StreamingWriter) SetMetadata(meta Metadata) {
 	sw.info = d
 }
 
+// SetPDFA enables PDF/A conformance objects for the streamed document.
+func (sw *StreamingWriter) SetPDFA(level PDFALevel) {
+	sw.pdfa = &level
+}
+
+// SetPDFUA enables PDF/UA conformance objects for the streamed document.
+func (sw *StreamingWriter) SetPDFUA(level PDFUALevel) {
+	sw.pdfua = &level
+	sw.markInfo = true
+	sw.displayTitle = true
+	if sw.lang == "" {
+		sw.lang = "en-US"
+	}
+}
+
+// SetLanguage sets the catalog /Lang value.
+func (sw *StreamingWriter) SetLanguage(lang string) {
+	sw.lang = lang
+}
+
+func (sw *StreamingWriter) addComplianceObjects() error {
+	if sw.pdfa == nil && sw.pdfua == nil {
+		return nil
+	}
+
+	xmp := buildComplianceXMPMetadata(sw.metadata, sw.pdfa, sw.pdfua)
+	xmpStream := core.NewStream(xmp)
+	xmpStream.Dictionary.Set("Type", core.PdfName("Metadata"))
+	xmpStream.Dictionary.Set("Subtype", core.PdfName("XML"))
+	metadataRef, err := sw.AddObject(xmpStream)
+	if err != nil {
+		return err
+	}
+	sw.metadataRef = metadataRef
+
+	if sw.pdfa != nil {
+		iccData, err := compressedSRGBICCProfile()
+		if err != nil {
+			return fmt.Errorf("compressing ICC profile: %w", err)
+		}
+		iccStream := core.NewStream(iccData)
+		iccStream.Dictionary.Set("Filter", core.PdfName("FlateDecode"))
+		iccStream.Dictionary.Set("Length", core.PdfInteger(len(iccData)))
+		iccStream.Dictionary.Set("N", core.PdfInteger(3))
+		iccNum, err := sw.AddObject(iccStream)
+		if err != nil {
+			return err
+		}
+
+		outputIntent := core.NewDictionaryCap(6)
+		outputIntent.Set("Type", core.PdfName("OutputIntent"))
+		outputIntent.Set("S", core.PdfName("GTS_PDFA1"))
+		outputIntent.Set("OutputConditionIdentifier", core.PdfString("sRGB"))
+		outputIntent.Set("RegistryName", core.PdfString("http://www.color.org"))
+		outputIntent.Set("Info", core.PdfString("sRGB IEC61966-2.1"))
+		outputIntent.Set("DestOutputProfile", core.PdfIndirectReference{ObjectNumber: iccNum})
+		oiNum, err := sw.AddObject(outputIntent)
+		if err != nil {
+			return err
+		}
+		sw.outputIntents = []int{oiNum}
+
+		h := md5.Sum([]byte(fmt.Sprintf("%s-%d", sw.metadata.Title, time.Now().UnixNano())))
+		sw.docIDPair = [2]core.PdfHexString{core.PdfHexString(h[:]), core.PdfHexString(h[:])}
+		sw.hasDocID = true
+	}
+
+	return nil
+}
+
+func (sw *StreamingWriter) addMinimalStructTree() error {
+	if sw.pdfua == nil || sw.structTreeRoot > 0 {
+		return nil
+	}
+
+	rootNum := sw.allocObj()
+	docElemNum := sw.allocObj()
+	parentTreeNum := sw.allocObj()
+
+	docElem := core.NewDictionaryCap(4)
+	docElem.Set("Type", core.PdfName("StructElem"))
+	docElem.Set("S", core.PdfName("Document"))
+	docElem.Set("P", core.PdfIndirectReference{ObjectNumber: rootNum})
+	docElem.Set("K", core.PdfArray{})
+	if err := sw.writeIndirectObject(docElemNum, docElem); err != nil {
+		return err
+	}
+
+	parentTree := core.NewDictionaryCap(1)
+	parentTree.Set("Nums", core.PdfArray{})
+	if err := sw.writeIndirectObject(parentTreeNum, parentTree); err != nil {
+		return err
+	}
+
+	root := core.NewDictionaryCap(4)
+	root.Set("Type", core.PdfName("StructTreeRoot"))
+	root.Set("K", core.PdfIndirectReference{ObjectNumber: docElemNum})
+	root.Set("ParentTree", core.PdfIndirectReference{ObjectNumber: parentTreeNum})
+	root.Set("ParentTreeNextKey", core.PdfInteger(0))
+	if err := sw.writeIndirectObject(rootNum, root); err != nil {
+		return err
+	}
+	sw.structTreeRoot = rootNum
+	return nil
+}
+
 // Finish writes the pages tree, catalog, xref table, and trailer. It must be
 // called exactly once after all pages have been added.
 func (sw *StreamingWriter) Finish() error {
@@ -393,10 +514,43 @@ func (sw *StreamingWriter) Finish() error {
 		return err
 	}
 
+	if err := sw.addComplianceObjects(); err != nil {
+		return err
+	}
+	if err := sw.addMinimalStructTree(); err != nil {
+		return err
+	}
+
 	// Build catalog.
-	catalog := core.NewDictionaryCap(2)
+	catalog := core.NewDictionaryCap(8)
 	catalog.Set("Type", core.PdfName("Catalog"))
 	catalog.Set("Pages", core.PdfIndirectReference{ObjectNumber: sw.pagesObj})
+	if sw.lang != "" {
+		catalog.Set("Lang", core.PdfString(sw.lang))
+	}
+	if sw.metadataRef > 0 {
+		catalog.Set("Metadata", core.PdfIndirectReference{ObjectNumber: sw.metadataRef})
+	}
+	if len(sw.outputIntents) > 0 {
+		arr := make(core.PdfArray, len(sw.outputIntents))
+		for i, n := range sw.outputIntents {
+			arr[i] = core.PdfIndirectReference{ObjectNumber: n}
+		}
+		catalog.Set("OutputIntents", arr)
+	}
+	if sw.markInfo {
+		mi := core.NewDictionaryCap(1)
+		mi.Set("Marked", core.PdfBoolean(true))
+		catalog.Set("MarkInfo", mi)
+	}
+	if sw.displayTitle {
+		vp := core.NewDictionaryCap(1)
+		vp.Set("DisplayDocTitle", core.PdfBoolean(true))
+		catalog.Set("ViewerPreferences", vp)
+	}
+	if sw.structTreeRoot > 0 {
+		catalog.Set("StructTreeRoot", core.PdfIndirectReference{ObjectNumber: sw.structTreeRoot})
+	}
 	catalogNum, err := sw.AddObject(catalog)
 	if err != nil {
 		return err
@@ -438,6 +592,9 @@ func (sw *StreamingWriter) Finish() error {
 	trailer.Set("Root", core.PdfIndirectReference{ObjectNumber: catalogNum})
 	if infoNum > 0 {
 		trailer.Set("Info", core.PdfIndirectReference{ObjectNumber: infoNum})
+	}
+	if sw.hasDocID {
+		trailer.Set("ID", core.PdfArray{sw.docIDPair[0], sw.docIDPair[1]})
 	}
 	if _, err := trailer.WriteTo(sw.counter); err != nil {
 		return err

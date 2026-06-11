@@ -39,6 +39,8 @@ type Writer struct {
 	// Tagged PDF fields
 	structTreeRoot int
 	markInfo       bool
+	language       string
+	displayTitle   bool
 }
 
 // NewWriter creates a new Writer ready to accept objects.
@@ -278,6 +280,12 @@ func (w *Writer) SetStructTreeRoot(objNum int) { w.structTreeRoot = objNum }
 // SetMarkInfo sets whether the catalog should include /MarkInfo << /Marked true >>.
 func (w *Writer) SetMarkInfo(marked bool) { w.markInfo = marked }
 
+// SetLanguage stores the document language for the catalog /Lang entry.
+func (w *Writer) SetLanguage(lang string) { w.language = lang }
+
+// SetDisplayDocTitle controls /ViewerPreferences /DisplayDocTitle.
+func (w *Writer) SetDisplayDocTitle(display bool) { w.displayTitle = display }
+
 // PageRef returns an indirect reference for the page at the given 0-based index.
 func (w *Writer) PageRef(pageIndex int) core.PdfIndirectReference {
 	if pageIndex < 0 || pageIndex >= len(w.pages) {
@@ -420,6 +428,9 @@ func (w *Writer) WriteTo(out io.Writer) (int64, error) {
 	catalog := core.NewDictionary()
 	catalog.Set("Type", core.PdfName("Catalog"))
 	catalog.Set("Pages", ref(pagesNum))
+	if w.language != "" {
+		catalog.Set("Lang", core.PdfString(w.language))
+	}
 	if w.metadataRef > 0 {
 		catalog.Set("Metadata", ref(w.metadataRef))
 	}
@@ -437,6 +448,11 @@ func (w *Writer) WriteTo(out io.Writer) (int64, error) {
 		mi := core.NewDictionary()
 		mi.Set("Marked", core.PdfBoolean(true))
 		catalog.Set("MarkInfo", mi)
+	}
+	if w.displayTitle {
+		vp := core.NewDictionary()
+		vp.Set("DisplayDocTitle", core.PdfBoolean(true))
+		catalog.Set("ViewerPreferences", vp)
 	}
 	if w.structTreeRoot > 0 {
 		catalog.Set("StructTreeRoot", ref(w.structTreeRoot))

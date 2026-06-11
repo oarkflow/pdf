@@ -36,6 +36,37 @@ func BenchmarkNativeFinancialReport(b *testing.B) {
 	b.ReportMetric(float64(b.N)/b.Elapsed().Seconds(), "pdfs/s")
 }
 
+func BenchmarkNativeFinancialReportCompliance(b *testing.B) {
+	barChart, pieChart := loadFinancialReportCharts(b)
+	data := benchmarkFinancialReportData(barChart, pieChart)
+	pdfa4 := document.PDFA4
+	pdfua2 := document.PDFUA2
+	data.PDFA = &pdfa4
+	data.PDFUA = &pdfua2
+	data.Language = "en-US"
+
+	compiled, err := template.CompileFinancialReport(data)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		var out bytes.Buffer
+		out.Grow(compiled.EstimatedSize())
+		if err := compiled.WriteStreamingTo(&out); err != nil {
+			b.Fatal(err)
+		}
+		if out.Len() == 0 {
+			b.Fatal("empty PDF output")
+		}
+	}
+
+	b.ReportMetric(float64(b.N)/b.Elapsed().Seconds(), "pdfs/s")
+}
+
 func loadFinancialReportCharts(tb testing.TB) ([]byte, []byte) {
 	tb.Helper()
 

@@ -5,22 +5,40 @@ import (
 	"encoding/binary"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/oarkflow/pdf/core"
 )
 
+var (
+	compressedSRGBOnce sync.Once
+	compressedSRGBData []byte
+	compressedSRGBErr  error
+)
+
 // buildPDFAObjects adds PDF/A conformance objects (XMP metadata, output intent
 // with sRGB ICC profile, document ID) to the writer.
 func (d *Document) buildPDFAObjects(w *Writer) error {
+	return d.buildComplianceObjects(w)
+}
+
+// buildComplianceObjects adds PDF/A and PDF/UA conformance objects.
+func (d *Document) buildComplianceObjects(w *Writer) error {
 	if d.pdfaLevel == nil {
+		if d.pdfuaLevel == nil {
+			return nil
+		}
+		xmp := buildComplianceXMPMetadata(d.metadata, nil, d.pdfuaLevel)
+		xmpStream := core.NewStream(xmp)
+		xmpStream.Dictionary.Set("Type", core.PdfName("Metadata"))
+		xmpStream.Dictionary.Set("Subtype", core.PdfName("XML"))
+		w.SetMetadataRef(w.AddObject(xmpStream))
 		return nil
 	}
 
-	part, conformance := parsePDFALevel(*d.pdfaLevel)
-
 	// 1. XMP metadata stream (must NOT be compressed per PDF/A).
-	xmp := buildPDFAXMPMetadata(d.metadata, part, conformance)
+	xmp := buildComplianceXMPMetadata(d.metadata, d.pdfaLevel, d.pdfuaLevel)
 	xmpStream := core.NewStream(xmp)
 	xmpStream.Dictionary.Set("Type", core.PdfName("Metadata"))
 	xmpStream.Dictionary.Set("Subtype", core.PdfName("XML"))
@@ -28,11 +46,13 @@ func (d *Document) buildPDFAObjects(w *Writer) error {
 	w.SetMetadataRef(xmpNum)
 
 	// 2. sRGB ICC profile + OutputIntent.
-	iccProfile := sRGBICCProfile()
-	iccStream := core.NewStream(iccProfile)
-	if err := iccStream.Compress(); err != nil {
+	iccData, err := compressedSRGBICCProfile()
+	if err != nil {
 		return fmt.Errorf("compressing ICC profile: %w", err)
 	}
+	iccStream := core.NewStream(iccData)
+	iccStream.Dictionary.Set("Filter", core.PdfName("FlateDecode"))
+	iccStream.Dictionary.Set("Length", core.PdfInteger(len(iccData)))
 	iccStream.Dictionary.Set("N", core.PdfInteger(3))
 	iccNum := w.AddObject(iccStream)
 
@@ -52,13 +72,33 @@ func (d *Document) buildPDFAObjects(w *Writer) error {
 	return nil
 }
 
-func parsePDFALevel(level PDFALevel) (int, string) {
+func parsePDFALevel(level PDFALevel) (part int, conformance string, rev string) {
 	switch level {
 	case PDFA2b:
-		return 2, "B"
+		return 2, "B", ""
+	case PDFA4:
+		return 4, "", "2020"
 	default:
-		return 1, "B"
+		return 1, "B", ""
 	}
+}
+
+func compressedSRGBICCProfile() ([]byte, error) {
+	compressedSRGBOnce.Do(func() {
+		stream := core.NewStream(sRGBICCProfile())
+		compressedSRGBErr = stream.Compress()
+		if compressedSRGBErr == nil {
+			compressedSRGBData = stream.Data
+		}
+	})
+	return compressedSRGBData, compressedSRGBErr
+}
+
+func parsePDFUALevel(level PDFUALevel) int {
+	if level == PDFUA2 {
+		return 2
+	}
+	return 1
 }
 
 // xmlEscape escapes XML special characters.
@@ -72,6 +112,18 @@ func xmlEscape(s string) string {
 
 // buildPDFAXMPMetadata generates XMP metadata with PDF/A identification.
 func buildPDFAXMPMetadata(meta Metadata, part int, conformance string) []byte {
+	level := PDFA1b
+	switch part {
+	case 2:
+		level = PDFA2b
+	case 4:
+		level = PDFA4
+	}
+	return buildComplianceXMPMetadata(meta, &level, nil)
+}
+
+// buildComplianceXMPMetadata generates XMP metadata with PDF/A and PDF/UA identification.
+func buildComplianceXMPMetadata(meta Metadata, pdfaLevel *PDFALevel, pdfuaLevel *PDFUALevel) []byte {
 	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
 
 	title := meta.Title
@@ -87,6 +139,22 @@ func buildPDFAXMPMetadata(meta Metadata, part int, conformance string) []byte {
 		producer = "github.com/oarkflow/pdf"
 	}
 
+	var pdfaFields string
+	if pdfaLevel != nil {
+		part, conformance, rev := parsePDFALevel(*pdfaLevel)
+		pdfaFields += fmt.Sprintf("      <pdfaid:part>%d</pdfaid:part>\n", part)
+		if rev != "" {
+			pdfaFields += fmt.Sprintf("      <pdfaid:rev>%s</pdfaid:rev>\n", xmlEscape(rev))
+		}
+		if conformance != "" {
+			pdfaFields += fmt.Sprintf("      <pdfaid:conformance>%s</pdfaid:conformance>\n", xmlEscape(conformance))
+		}
+	}
+	var pdfuaFields string
+	if pdfuaLevel != nil {
+		pdfuaFields = fmt.Sprintf("      <pdfuaid:part>%d</pdfuaid:part>\n", parsePDFUALevel(*pdfuaLevel))
+	}
+
 	xmp := fmt.Sprintf(`<?xpacket begin="%s" id="W5M0MpCehiHzreSzNTczkc9d"?>
 <x:xmpmeta xmlns:x="adobe:ns:meta/">
   <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
@@ -94,7 +162,8 @@ func buildPDFAXMPMetadata(meta Metadata, part int, conformance string) []byte {
         xmlns:dc="http://purl.org/dc/elements/1.1/"
         xmlns:xmp="http://ns.adobe.com/xap/1.0/"
         xmlns:pdf="http://ns.adobe.com/pdf/1.3/"
-        xmlns:pdfaid="http://www.aiim.org/pdfa/ns/id/">
+        xmlns:pdfaid="http://www.aiim.org/pdfa/ns/id/"
+        xmlns:pdfuaid="http://www.aiim.org/pdfua/ns/id/">
       <dc:title>
         <rdf:Alt>
           <rdf:li xml:lang="x-default">%s</rdf:li>
@@ -108,8 +177,7 @@ func buildPDFAXMPMetadata(meta Metadata, part int, conformance string) []byte {
       <xmp:CreateDate>%s</xmp:CreateDate>
       <xmp:ModifyDate>%s</xmp:ModifyDate>
       <pdf:Producer>%s</pdf:Producer>
-      <pdfaid:part>%d</pdfaid:part>
-      <pdfaid:conformance>%s</pdfaid:conformance>
+%s%s
     </rdf:Description>
   </rdf:RDF>
 </x:xmpmeta>
@@ -119,8 +187,8 @@ func buildPDFAXMPMetadata(meta Metadata, part int, conformance string) []byte {
 		xmlEscape(creator),
 		now, now,
 		xmlEscape(producer),
-		part,
-		conformance,
+		pdfaFields,
+		pdfuaFields,
 	)
 
 	return []byte(xmp)

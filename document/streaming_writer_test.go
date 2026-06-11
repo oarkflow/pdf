@@ -167,6 +167,39 @@ func TestDocument_WriteStreamingTo(t *testing.T) {
 	assertValidPDF(t, buf.String())
 }
 
+func TestDocument_WriteStreamingTo_ComplianceMarkers(t *testing.T) {
+	doc, _ := NewDocument(A4)
+	doc.SetMetadata(Metadata{Title: "Streaming Compliance"})
+	doc.SetPDFA(PDFA4)
+	doc.SetPDFUA(PDFUA2)
+
+	page := NewPage(A4)
+	page.Contents = []byte("BT /F1 12 Tf 100 700 Td (Streaming Compliance) Tj ET")
+	page.Fonts["F1"] = 0
+	doc.AddPage(page)
+
+	var buf bytes.Buffer
+	if err := doc.WriteStreamingTo(&buf); err != nil {
+		t.Fatalf("WriteStreamingTo: %v", err)
+	}
+
+	output := buf.String()
+	assertValidPDF(t, output)
+	for _, want := range []string{
+		"<pdfaid:part>4</pdfaid:part>",
+		"<pdfuaid:part>2</pdfuaid:part>",
+		"/OutputIntents",
+		"/Metadata",
+		"/StructTreeRoot",
+		"/MarkInfo",
+		"/ID",
+	} {
+		if !strings.Contains(output, want) {
+			t.Errorf("expected %q", want)
+		}
+	}
+}
+
 func assertValidPDF(t *testing.T, output string) {
 	t.Helper()
 

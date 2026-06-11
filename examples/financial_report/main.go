@@ -146,73 +146,83 @@ func buildFinancialReportData(barChart, pieChart []byte) template.FinancialRepor
 	shade := [3]float64{0.957, 0.965, 0.969}
 	highlight := [3]float64{0.831, 0.902, 0.945}
 	muted := [3]float64{0.337, 0.404, 0.451}
+	pdfa4 := document.PDFA4
+	pdfua2 := document.PDFUA2
+	compliance := os.Getenv("FINANCIAL_REPORT_COMPLIANCE") == "1"
 
-	return template.FinancialReportData{
+	data := template.FinancialReportData{
 		Title:      "FINANCIAL REPORT",
 		Subject:    "Financial Report",
 		PageSize:   document.A4,
 		Margins:    document.Margins{Top: 36, Right: 36, Bottom: 42, Left: 36},
 		FooterText: "TECHCORP INDUSTRIES INC. | FINANCIAL REPORT Q4 2025 | CONFIDENTIAL",
-		Blocks: []template.FinancialReportBlock{
-			{Heading: &template.FinancialReportHeading{Text: "FINANCIAL REPORT", FontSize: 24, Bold: true, Align: layout.AlignCenter, TextColor: white, BgColor: &darkBlue, Height: 44}},
-			{Heading: &template.FinancialReportHeading{Text: "SECTION A: COMPANY INFORMATION", FontSize: 12, Bold: true, TextColor: white, BgColor: &blue, Height: 22}},
-			{Table: &template.FinancialReportTable{
-				ColumnWidths: []float64{105, 200, 105, 113.28},
-				CellPadding:  4,
-				BorderWidth:  0.4,
-				Rows: [][]template.FinancialReportCell{
-					{
-						exampleCell("Company Name:", true, layout.AlignLeft, &shade), exampleCell("TechCorp Industries Inc.", false, layout.AlignLeft, &shade),
-						exampleCell("Report Period:", true, layout.AlignLeft, &shade), exampleCell("Q4 2025", false, layout.AlignLeft, &shade),
-					},
-					{
-						exampleCell("Address:", true, layout.AlignLeft, nil), exampleCell("123 Business Ave, Suite 456, City, State 12345", false, layout.AlignLeft, nil),
-						exampleCell("Fiscal Year:", true, layout.AlignLeft, nil), exampleCell("2025", false, layout.AlignLeft, nil),
-					},
-				},
-			}},
-			{Heading: &template.FinancialReportHeading{Text: "SECTION B: FINANCIAL SUMMARY", FontSize: 12, Bold: true, TextColor: white, BgColor: &blue, Height: 22}},
-			{Table: &template.FinancialReportTable{
-				ColumnWidths: []float64{348.85, 174.43},
-				CellPadding:  4,
-				BorderWidth:  0.4,
-				Rows: [][]template.FinancialReportCell{
-					exampleSummaryRow("Total Revenue", "$2,450,000", false, nil),
-					exampleSummaryRow("Cost of Goods Sold", "$1,225,000", false, &shade),
-					exampleSummaryRow("Gross Profit", "$1,225,000", true, &highlight),
-					exampleSummaryRow("Operating Expenses", "$750,000", false, nil),
-					exampleSummaryRow("Net Income", "$125,000", true, &highlight),
-					exampleSummaryRow("Total Assets", "$5,000,000", true, &highlight),
-					exampleSummaryRow("Total Liabilities", "$2,500,000", false, nil),
-					exampleSummaryRow("Shareholders' Equity", "$2,500,000", true, &highlight),
-				},
-			}},
-			{Spacer: 160},
-			{Heading: &template.FinancialReportHeading{Text: "SECTION C: CHARTS", FontSize: 12, Bold: true, TextColor: white, BgColor: &blue, Height: 22}},
-			{Table: &template.FinancialReportTable{
-				ColumnWidths: []float64{261.64, 261.64},
-				CellPadding:  4,
-				BorderWidth:  0.4,
-				Rows: [][]template.FinancialReportCell{{
-					exampleCell("REVENUE BREAKDOWN", true, layout.AlignCenter, &shade),
-					exampleCell("EXPENSE DISTRIBUTION", true, layout.AlignCenter, &shade),
-				}},
-			}},
-			{ImageGrid: &template.FinancialReportImageGrid{
-				ColumnWidths: []float64{261.64, 261.64},
-				CellPadding:  4,
-				BorderWidth:  0.4,
-				Images: []template.FinancialReportImage{
-					{Data: barChart, Alt: "BarChart", Width: 200, Height: 200, Align: layout.AlignCenter},
-					{Data: pieChart, Alt: "PieChart", Width: 200, Height: 200, Align: layout.AlignCenter},
-				},
-				Captions: []template.FinancialReportCell{
-					{Text: "Figure 1: Quarterly revenue comparison by region", FontSize: 8, Align: layout.AlignCenter, TextColor: muted},
-					{Text: "Figure 2: Breakdown of operating expenses", FontSize: 8, Align: layout.AlignCenter, TextColor: muted},
-				},
-			}},
-		},
+		Language:   "en-US",
 	}
+	if compliance {
+		data.PDFA = &pdfa4
+		data.PDFUA = &pdfua2
+	}
+
+	data.Blocks = []template.FinancialReportBlock{
+		{Heading: &template.FinancialReportHeading{Text: "FINANCIAL REPORT", FontSize: 24, Bold: true, Align: layout.AlignCenter, TextColor: white, BgColor: &darkBlue, Height: 44}},
+		{Heading: &template.FinancialReportHeading{Text: "SECTION A: COMPANY INFORMATION", FontSize: 12, Bold: true, TextColor: white, BgColor: &blue, Height: 22}},
+		{Table: &template.FinancialReportTable{
+			ColumnWidths: []float64{105, 200, 105, 113.28},
+			CellPadding:  4,
+			BorderWidth:  0.4,
+			Rows: [][]template.FinancialReportCell{
+				{
+					exampleCell("Company Name:", true, layout.AlignLeft, &shade), exampleCell("TechCorp Industries Inc.", false, layout.AlignLeft, &shade),
+					exampleCell("Report Period:", true, layout.AlignLeft, &shade), exampleCell("Q4 2025", false, layout.AlignLeft, &shade),
+				},
+				{
+					exampleCell("Address:", true, layout.AlignLeft, nil), exampleCell("123 Business Ave, Suite 456, City, State 12345", false, layout.AlignLeft, nil),
+					exampleCell("Fiscal Year:", true, layout.AlignLeft, nil), exampleCell("2025", false, layout.AlignLeft, nil),
+				},
+			},
+		}},
+		{Heading: &template.FinancialReportHeading{Text: "SECTION B: FINANCIAL SUMMARY", FontSize: 12, Bold: true, TextColor: white, BgColor: &blue, Height: 22}},
+		{Table: &template.FinancialReportTable{
+			ColumnWidths: []float64{348.85, 174.43},
+			CellPadding:  4,
+			BorderWidth:  0.4,
+			Rows: [][]template.FinancialReportCell{
+				exampleSummaryRow("Total Revenue", "$2,450,000", false, nil),
+				exampleSummaryRow("Cost of Goods Sold", "$1,225,000", false, &shade),
+				exampleSummaryRow("Gross Profit", "$1,225,000", true, &highlight),
+				exampleSummaryRow("Operating Expenses", "$750,000", false, nil),
+				exampleSummaryRow("Net Income", "$125,000", true, &highlight),
+				exampleSummaryRow("Total Assets", "$5,000,000", true, &highlight),
+				exampleSummaryRow("Total Liabilities", "$2,500,000", false, nil),
+				exampleSummaryRow("Shareholders' Equity", "$2,500,000", true, &highlight),
+			},
+		}},
+		{Spacer: 160},
+		{Heading: &template.FinancialReportHeading{Text: "SECTION C: CHARTS", FontSize: 12, Bold: true, TextColor: white, BgColor: &blue, Height: 22}},
+		{Table: &template.FinancialReportTable{
+			ColumnWidths: []float64{261.64, 261.64},
+			CellPadding:  4,
+			BorderWidth:  0.4,
+			Rows: [][]template.FinancialReportCell{{
+				exampleCell("REVENUE BREAKDOWN", true, layout.AlignCenter, &shade),
+				exampleCell("EXPENSE DISTRIBUTION", true, layout.AlignCenter, &shade),
+			}},
+		}},
+		{ImageGrid: &template.FinancialReportImageGrid{
+			ColumnWidths: []float64{261.64, 261.64},
+			CellPadding:  4,
+			BorderWidth:  0.4,
+			Images: []template.FinancialReportImage{
+				{Data: barChart, Alt: "BarChart", Width: 200, Height: 200, Align: layout.AlignCenter},
+				{Data: pieChart, Alt: "PieChart", Width: 200, Height: 200, Align: layout.AlignCenter},
+			},
+			Captions: []template.FinancialReportCell{
+				{Text: "Figure 1: Quarterly revenue comparison by region", FontSize: 8, Align: layout.AlignCenter, TextColor: muted},
+				{Text: "Figure 2: Breakdown of operating expenses", FontSize: 8, Align: layout.AlignCenter, TextColor: muted},
+			},
+		}},
+	}
+	return data
 }
 
 func exampleCell(text string, bold bool, align layout.Alignment, bg *[3]float64) template.FinancialReportCell {
