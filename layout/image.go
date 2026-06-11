@@ -1,15 +1,19 @@
 package layout
 
-import "fmt"
+import (
+	"fmt"
+
+	pdfimage "github.com/oarkflow/pdf/image"
+)
 
 // ImageElement is an image layout element.
 type ImageElement struct {
-	Source  []byte   // raw image data
+	Source  []byte // raw image data
 	Image   ImageEntry
-	Width   float64  // desired width (0 = auto)
-	Height  float64  // desired height (0 = auto)
-	OrigW   int      // original pixel width
-	OrigH   int      // original pixel height
+	Width   float64 // desired width (0 = auto)
+	Height  float64 // desired height (0 = auto)
+	OrigW   int     // original pixel width
+	OrigH   int     // original pixel height
 	Fit     ImageFit
 	Align   Alignment
 	Alt     string
@@ -29,8 +33,23 @@ const (
 
 // NewImage creates a new image element.
 func NewImage(data []byte, origWidth, origHeight int) *ImageElement {
+	var entry ImageEntry
+	if decoded, err := pdfimage.LoadCached(data); err == nil {
+		entry = ImageEntry{
+			Image:  decoded,
+			Width:  decoded.Width,
+			Height: decoded.Height,
+		}
+		if origWidth == 0 {
+			origWidth = decoded.Width
+		}
+		if origHeight == 0 {
+			origHeight = decoded.Height
+		}
+	}
 	return &ImageElement{
 		Source: data,
+		Image:  entry,
 		OrigW:  origWidth,
 		OrigH:  origHeight,
 		Fit:    FitContain,

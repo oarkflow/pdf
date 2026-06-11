@@ -3,9 +3,11 @@ package image
 import (
 	"bytes"
 	"fmt"
+	"hash/fnv"
 	goimage "image"
 	"image/color"
 	_ "image/gif"
+	"sync"
 
 	"github.com/oarkflow/pdf/core"
 	"golang.org/x/image/webp"
@@ -21,6 +23,13 @@ type Image struct {
 	AlphaData   []byte // optional alpha channel
 	Filter      string // FlateDecode, DCTDecode
 	RawStream   []byte // for JPEG passthrough
+	DecodeParms *core.PdfDictionary
+	flateOnce   sync.Once
+	flateData   []byte
+	flateErr    error
+	alphaOnce   sync.Once
+	alphaFlate  []byte
+	alphaErr    error
 }
 
 // FromGoImage converts a Go image.Image to our Image struct.
@@ -104,10 +113,18 @@ func FromGoImage(img goimage.Image) *Image {
 // Returns the main image object and optionally a soft mask object.
 func (img *Image) BuildXObject(objNum int, smaskObjNum int) (main core.PdfIndirectObject, smask *core.PdfIndirectObject, err error) {
 	var stream *core.PdfStream
-	if img.Filter == "DCTDecode" && img.RawStream != nil {
+	if img.RawStream != nil && img.Filter != "" {
 		stream = core.NewStream(img.RawStream)
-		stream.Dictionary.Set("Filter", core.PdfName("DCTDecode"))
+		stream.Dictionary.Set("Filter", core.PdfName(img.Filter))
 		stream.Dictionary.Set("Length", core.PdfInteger(len(img.RawStream)))
+	} else if img.Filter == "FlateDecode" {
+		data, compressErr := img.CompressedData()
+		if compressErr != nil {
+			return core.PdfIndirectObject{}, nil, compressErr
+		}
+		stream = core.NewStream(data)
+		stream.Dictionary.Set("Filter", core.PdfName("FlateDecode"))
+		stream.Dictionary.Set("Length", core.PdfInteger(len(data)))
 	} else {
 		stream = core.NewStream(img.Data)
 		if err := stream.Compress(); err != nil {
@@ -121,13 +138,19 @@ func (img *Image) BuildXObject(objNum int, smaskObjNum int) (main core.PdfIndire
 	stream.Dictionary.Set("Height", core.PdfInteger(img.Height))
 	stream.Dictionary.Set("ColorSpace", core.PdfName(img.ColorSpace))
 	stream.Dictionary.Set("BitsPerComponent", core.PdfInteger(img.BitsPerComp))
+	if img.DecodeParms != nil {
+		stream.Dictionary.Set("DecodeParms", img.DecodeParms)
+	}
 
 	// Build SMask if alpha data is present.
 	if len(img.AlphaData) > 0 {
-		smaskStream := core.NewStream(img.AlphaData)
-		if err := smaskStream.Compress(); err != nil {
-			return core.PdfIndirectObject{}, nil, fmt.Errorf("compressing alpha data: %w", err)
+		alphaData, compressErr := img.CompressedAlphaData()
+		if compressErr != nil {
+			return core.PdfIndirectObject{}, nil, compressErr
 		}
+		smaskStream := core.NewStream(alphaData)
+		smaskStream.Dictionary.Set("Filter", core.PdfName("FlateDecode"))
+		smaskStream.Dictionary.Set("Length", core.PdfInteger(len(alphaData)))
 		smaskStream.Dictionary.Set("Type", core.PdfName("XObject"))
 		smaskStream.Dictionary.Set("Subtype", core.PdfName("Image"))
 		smaskStream.Dictionary.Set("Width", core.PdfInteger(img.Width))
@@ -149,6 +172,32 @@ func (img *Image) BuildXObject(objNum int, smaskObjNum int) (main core.PdfIndire
 		Object:    stream,
 	}
 	return main, smask, nil
+}
+
+// CompressedData returns a cached Flate-compressed copy of the image data.
+func (img *Image) CompressedData() ([]byte, error) {
+	img.flateOnce.Do(func() {
+		stream := core.NewStream(img.Data)
+		if err := stream.Compress(); err != nil {
+			img.flateErr = fmt.Errorf("compressing image data: %w", err)
+			return
+		}
+		img.flateData = stream.Data
+	})
+	return img.flateData, img.flateErr
+}
+
+// CompressedAlphaData returns a cached Flate-compressed copy of the alpha mask.
+func (img *Image) CompressedAlphaData() ([]byte, error) {
+	img.alphaOnce.Do(func() {
+		stream := core.NewStream(img.AlphaData)
+		if err := stream.Compress(); err != nil {
+			img.alphaErr = fmt.Errorf("compressing alpha data: %w", err)
+			return
+		}
+		img.alphaFlate = stream.Data
+	})
+	return img.alphaFlate, img.alphaErr
 }
 
 // Load auto-detects image format from magic bytes and loads accordingly.
@@ -194,3 +243,32 @@ func LoadWebP(data []byte) (*Image, error) {
 
 // Ensure color is imported (used by FromGoImage indirectly).
 var _ = color.RGBAModel
+
+var decodedImageCache sync.Map
+
+// LoadCached loads image data and reuses decoded immutable image objects by
+// content hash. It is useful for high-volume template/report generation where
+// the same logo or chart appears in many documents.
+func LoadCached(data []byte) (*Image, error) {
+	key := imageCacheKey(data)
+	if cached, ok := decodedImageCache.Load(key); ok {
+		return cached.(*Image), nil
+	}
+	img, err := Load(data)
+	if err != nil {
+		return nil, err
+	}
+	actual, _ := decodedImageCache.LoadOrStore(key, img)
+	return actual.(*Image), nil
+}
+
+// ResetDecodeCache clears the decoded image cache.
+func ResetDecodeCache() {
+	decodedImageCache = sync.Map{}
+}
+
+func imageCacheKey(data []byte) uint64 {
+	h := fnv.New64a()
+	_, _ = h.Write(data)
+	return h.Sum64()
+}

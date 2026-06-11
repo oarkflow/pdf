@@ -3,6 +3,7 @@ package document
 import (
 	"fmt"
 	"io"
+	"strconv"
 
 	"github.com/oarkflow/pdf/core"
 	pdffont "github.com/oarkflow/pdf/font"
@@ -20,9 +21,38 @@ type StreamingWriter struct {
 	offsets  map[int]int64 // object number -> byte offset
 	pages    []int         // page object numbers
 	nextObj  int
+	pagesObj int
 	fontObjs map[string]int
 	info     *core.PdfDictionary
 	finished bool
+}
+
+func (sw *StreamingWriter) writeInt(v int) error {
+	var buf [24]byte
+	_, err := sw.counter.Write(strconv.AppendInt(buf[:0], int64(v), 10))
+	return err
+}
+
+func (sw *StreamingWriter) writeInt64(v int64) error {
+	var buf [24]byte
+	_, err := sw.counter.Write(strconv.AppendInt(buf[:0], v, 10))
+	return err
+}
+
+func (sw *StreamingWriter) writeXrefOffset(offset int64) error {
+	var buf [20]byte
+	for i := 0; i < 10; i++ {
+		buf[i] = '0'
+	}
+	b := strconv.AppendInt(buf[:10], offset, 10)
+	if extra := len(b) - 10; extra > 0 {
+		copy(buf[:], b[extra:])
+	} else if extra < 0 {
+		copy(buf[-extra:], b)
+	}
+	copy(buf[10:], " 00000 n \r\n")
+	_, err := sw.counter.Write(buf[:20])
+	return err
 }
 
 // NewStreamingWriter creates a StreamingWriter that writes PDF output directly
@@ -31,10 +61,12 @@ func NewStreamingWriter(out io.Writer) (*StreamingWriter, error) {
 	cw := &countingWriter{w: out}
 	sw := &StreamingWriter{
 		counter:  cw,
-		offsets:  make(map[int]int64),
-		fontObjs: make(map[string]int),
+		offsets:  make(map[int]int64, 16),
+		fontObjs: make(map[string]int, 4),
+		pages:    make([]int, 0, 4),
 		nextObj:  1,
 	}
+	sw.pagesObj = sw.allocObj()
 
 	// Write PDF header immediately.
 	if _, err := io.WriteString(cw, "%PDF-1.7\n"); err != nil {
@@ -82,7 +114,7 @@ func (sw *StreamingWriter) ensureStandardFont(name string) (int, error) {
 	if num, ok := sw.fontObjs[name]; ok {
 		return num, nil
 	}
-	d := core.NewDictionary()
+	d := core.NewDictionaryCap(4)
 	d.Set("Type", core.PdfName("Font"))
 	d.Set("Subtype", core.PdfName("Type1"))
 	d.Set("BaseFont", core.PdfName(name))
@@ -153,17 +185,20 @@ func (sw *StreamingWriter) addImageObject(img *pdfimage.Image) (int, error) {
 // written during Finish(). Returns the page object number.
 func (sw *StreamingWriter) AddPage(page *Page) (int, error) {
 	// Write content stream.
-	stream := core.NewStream(page.Contents)
-	if err := stream.Compress(); err != nil {
-		return 0, fmt.Errorf("compressing page content: %w", err)
+	contentData, err := page.CompressedContents()
+	if err != nil {
+		return 0, err
 	}
+	stream := core.NewStream(contentData)
+	stream.Dictionary.Set("Filter", core.PdfName("FlateDecode"))
+	stream.Dictionary.Set("Length", core.PdfInteger(len(contentData)))
 	contentsNum, err := sw.AddObject(stream)
 	if err != nil {
 		return 0, err
 	}
 
 	// Build resource dict.
-	res := core.NewDictionary()
+	res := core.NewDictionaryCap(3)
 	if page.Resources != nil {
 		for _, k := range page.Resources.Keys() {
 			res.Set(k, page.Resources.Get(k))
@@ -172,7 +207,7 @@ func (sw *StreamingWriter) AddPage(page *Page) (int, error) {
 
 	// Fonts.
 	if len(page.FontEntries) > 0 || len(page.Fonts) > 0 {
-		fontDict := core.NewDictionary()
+		fontDict := core.NewDictionaryCap(len(page.FontEntries) + len(page.Fonts))
 		for resourceName, entry := range page.FontEntries {
 			objNum := entry.ObjectNum
 			if entry.Embedded != nil || (entry.Face != nil && !pdffont.IsStandardFont(entry.Face.PostScriptName())) {
@@ -215,7 +250,7 @@ func (sw *StreamingWriter) AddPage(page *Page) (int, error) {
 
 	// Images.
 	if len(page.Images) > 0 {
-		xobjDict := core.NewDictionary()
+		xobjDict := core.NewDictionaryCap(len(page.Images))
 		for name, entry := range page.Images {
 			objNum := entry.ObjectNum
 			if objNum == 0 && entry.Image != nil {
@@ -232,12 +267,9 @@ func (sw *StreamingWriter) AddPage(page *Page) (int, error) {
 		res.Set("XObject", xobjDict)
 	}
 
-	pageDict := core.NewDictionary()
+	pageDict := core.NewDictionaryCap(6)
 	pageDict.Set("Type", core.PdfName("Page"))
-	// Parent will be set to the Pages tree object, written during Finish().
-	// We don't know its number yet, but we record a placeholder that gets
-	// resolved in the xref: the Pages object is always written in Finish().
-	// We use a forward reference — valid because xref is written last.
+	pageDict.Set("Parent", core.PdfIndirectReference{ObjectNumber: sw.pagesObj})
 	pageDict.Set("MediaBox", core.PdfArray{
 		core.PdfNumber(0), core.PdfNumber(0),
 		core.PdfNumber(page.Size.Width), core.PdfNumber(page.Size.Height),
@@ -252,7 +284,7 @@ func (sw *StreamingWriter) AddPage(page *Page) (int, error) {
 	if len(page.Annotations) > 0 {
 		var annotRefs core.PdfArray
 		for _, link := range page.Annotations {
-			annotDict := core.NewDictionary()
+			annotDict := core.NewDictionaryCap(5)
 			annotDict.Set("Type", core.PdfName("Annot"))
 			annotDict.Set("Subtype", core.PdfName("Link"))
 			annotDict.Set("Rect", core.PdfArray{
@@ -262,7 +294,7 @@ func (sw *StreamingWriter) AddPage(page *Page) (int, error) {
 			annotDict.Set("Border", core.PdfArray{
 				core.PdfNumber(0), core.PdfNumber(0), core.PdfNumber(0),
 			})
-			actionDict := core.NewDictionary()
+			actionDict := core.NewDictionaryCap(2)
 			actionDict.Set("S", core.PdfName("URI"))
 			actionDict.Set("URI", core.PdfString(link.URI))
 			annotDict.Set("A", actionDict)
@@ -285,9 +317,56 @@ func (sw *StreamingWriter) AddPage(page *Page) (int, error) {
 
 // SetInfo sets document metadata, which will be written during Finish().
 func (sw *StreamingWriter) SetInfo(info map[string]string) {
-	d := core.NewDictionary()
+	d := core.NewDictionaryCap(len(info))
 	for k, v := range info {
 		d.Set(k, core.PdfString(v))
+	}
+	sw.info = d
+}
+
+// SetMetadata sets document metadata without requiring callers to allocate a map.
+func (sw *StreamingWriter) SetMetadata(meta Metadata) {
+	count := 0
+	if meta.Title != "" {
+		count++
+	}
+	if meta.Author != "" {
+		count++
+	}
+	if meta.Subject != "" {
+		count++
+	}
+	if meta.Keywords != "" {
+		count++
+	}
+	if meta.Creator != "" {
+		count++
+	}
+	if meta.Producer != "" {
+		count++
+	}
+	if count == 0 {
+		sw.info = nil
+		return
+	}
+	d := core.NewDictionaryCap(count)
+	if meta.Title != "" {
+		d.Set("Title", core.PdfString(meta.Title))
+	}
+	if meta.Author != "" {
+		d.Set("Author", core.PdfString(meta.Author))
+	}
+	if meta.Subject != "" {
+		d.Set("Subject", core.PdfString(meta.Subject))
+	}
+	if meta.Keywords != "" {
+		d.Set("Keywords", core.PdfString(meta.Keywords))
+	}
+	if meta.Creator != "" {
+		d.Set("Creator", core.PdfString(meta.Creator))
+	}
+	if meta.Producer != "" {
+		d.Set("Producer", core.PdfString(meta.Producer))
 	}
 	sw.info = d
 }
@@ -300,43 +379,24 @@ func (sw *StreamingWriter) Finish() error {
 	}
 	sw.finished = true
 
-	// Write Pages tree object. We now know all page object numbers.
+	// Write Pages tree object. Its object number was reserved before pages
+	// were streamed so page dictionaries can point to a strict Parent ref.
 	kids := make(core.PdfArray, len(sw.pages))
 	for i, pn := range sw.pages {
 		kids[i] = core.PdfIndirectReference{ObjectNumber: pn}
 	}
-	pagesDict := core.NewDictionary()
+	pagesDict := core.NewDictionaryCap(3)
 	pagesDict.Set("Type", core.PdfName("Pages"))
 	pagesDict.Set("Kids", kids)
 	pagesDict.Set("Count", core.PdfInteger(len(sw.pages)))
-	pagesNum, err := sw.AddObject(pagesDict)
-	if err != nil {
+	if err := sw.writeIndirectObject(sw.pagesObj, pagesDict); err != nil {
 		return err
 	}
 
-	// Now patch each page's Parent reference. Since pages are already written,
-	// we cannot modify them in the stream. Instead, we rely on the fact that
-	// PDF readers tolerate missing Parent in page dicts, OR we write the Parent
-	// in advance. The approach here: we wrote page dicts without Parent. Most
-	// PDF readers (including Adobe) tolerate this, but for strict compliance
-	// we should have it. We handle this by re-writing each page object at the
-	// end with the Parent set. The xref will point to the latest offset.
-	//
-	// Actually, a simpler approach: re-write page objects with Parent set.
-	// The xref table maps object numbers to offsets, so the last written
-	// offset wins.
-	for _, pageNum := range sw.pages {
-		// We need to reconstruct the page dict. But we don't have it anymore.
-		// Instead, let's use a different strategy: DON'T set Parent. PDF 2.0
-		// and most readers handle missing Parent fine. This keeps the streaming
-		// writer truly streaming.
-		_ = pageNum
-	}
-
 	// Build catalog.
-	catalog := core.NewDictionary()
+	catalog := core.NewDictionaryCap(2)
 	catalog.Set("Type", core.PdfName("Catalog"))
-	catalog.Set("Pages", core.PdfIndirectReference{ObjectNumber: pagesNum})
+	catalog.Set("Pages", core.PdfIndirectReference{ObjectNumber: sw.pagesObj})
 	catalogNum, err := sw.AddObject(catalog)
 	if err != nil {
 		return err
@@ -354,14 +414,17 @@ func (sw *StreamingWriter) Finish() error {
 	// Write xref table.
 	xrefOffset := sw.counter.written
 	totalObjects := sw.nextObj
-	if _, err := fmt.Fprintf(sw.counter, "xref\n0 %d\n", totalObjects); err != nil {
+	if _, err := io.WriteString(sw.counter, "xref\n0 "); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(sw.counter, "0000000000 65535 f \r\n"); err != nil {
+	if err := sw.writeInt(totalObjects); err != nil {
+		return err
+	}
+	if _, err := io.WriteString(sw.counter, "\n0000000000 65535 f \r\n"); err != nil {
 		return err
 	}
 	for num := 1; num < totalObjects; num++ {
-		if _, err := fmt.Fprintf(sw.counter, "%010d 00000 n \r\n", sw.offsets[num]); err != nil {
+		if err := sw.writeXrefOffset(sw.offsets[num]); err != nil {
 			return err
 		}
 	}
@@ -370,7 +433,7 @@ func (sw *StreamingWriter) Finish() error {
 	if _, err := io.WriteString(sw.counter, "trailer\n"); err != nil {
 		return err
 	}
-	trailer := core.NewDictionary()
+	trailer := core.NewDictionaryCap(3)
 	trailer.Set("Size", core.PdfInteger(totalObjects))
 	trailer.Set("Root", core.PdfIndirectReference{ObjectNumber: catalogNum})
 	if infoNum > 0 {
@@ -379,7 +442,13 @@ func (sw *StreamingWriter) Finish() error {
 	if _, err := trailer.WriteTo(sw.counter); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(sw.counter, "\nstartxref\n%d\n%%%%EOF\n", xrefOffset); err != nil {
+	if _, err := io.WriteString(sw.counter, "\nstartxref\n"); err != nil {
+		return err
+	}
+	if err := sw.writeInt64(xrefOffset); err != nil {
+		return err
+	}
+	if _, err := io.WriteString(sw.counter, "\n%%EOF\n"); err != nil {
 		return err
 	}
 

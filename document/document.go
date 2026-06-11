@@ -272,30 +272,33 @@ func (d *Document) WriteStreamingTo(w io.Writer) error {
 
 	total := len(d.pages)
 	for i, page := range d.pages {
-		var content []byte
-		content = append(content, page.Contents...)
-		if d.header != nil {
-			content = append(content, d.header(PageInfo{
-				Number: i + 1, Total: total,
-				Width: page.Size.Width, Height: page.Size.Height,
-			})...)
-		}
-		if d.footer != nil {
-			content = append(content, d.footer(PageInfo{
-				Number: i + 1, Total: total,
-				Width: page.Size.Width, Height: page.Size.Height,
-			})...)
-		}
+		p := page
+		if d.header != nil || d.footer != nil {
+			var content []byte
+			content = append(content, page.Contents...)
+			if d.header != nil {
+				content = append(content, d.header(PageInfo{
+					Number: i + 1, Total: total,
+					Width: page.Size.Width, Height: page.Size.Height,
+				})...)
+			}
+			if d.footer != nil {
+				content = append(content, d.footer(PageInfo{
+					Number: i + 1, Total: total,
+					Width: page.Size.Width, Height: page.Size.Height,
+				})...)
+			}
 
-		p := &Page{
-			Size:        page.Size,
-			Resources:   page.Resources,
-			Contents:    content,
-			Rotation:    page.Rotation,
-			Fonts:       page.Fonts,
-			FontEntries: page.FontEntries,
-			Images:      page.Images,
-			Annotations: page.Annotations,
+			p = &Page{
+				Size:        page.Size,
+				Resources:   page.Resources,
+				Contents:    content,
+				Rotation:    page.Rotation,
+				Fonts:       page.Fonts,
+				FontEntries: page.FontEntries,
+				Images:      page.Images,
+				Annotations: page.Annotations,
+			}
 		}
 		if _, err := sw.AddPage(p); err != nil {
 			return err

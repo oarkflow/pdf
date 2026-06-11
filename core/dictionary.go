@@ -21,6 +21,11 @@ func NewDictionary() *PdfDictionary {
 	return &PdfDictionary{}
 }
 
+// NewDictionaryCap creates an empty PdfDictionary with capacity for n entries.
+func NewDictionaryCap(n int) *PdfDictionary {
+	return &PdfDictionary{entries: make([]DictEntry, 0, n)}
+}
+
 func (d *PdfDictionary) Type() ObjectType { return ObjDictionary }
 
 // Set adds or updates a key-value pair. If the key already exists its value is

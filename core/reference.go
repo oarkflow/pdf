@@ -1,8 +1,8 @@
 package core
 
 import (
-	"fmt"
 	"io"
+	"strconv"
 )
 
 // PdfIndirectReference represents a PDF indirect reference (N G R).
@@ -14,8 +14,12 @@ type PdfIndirectReference struct {
 func (r PdfIndirectReference) Type() ObjectType { return ObjReference }
 
 func (r PdfIndirectReference) WriteTo(w io.Writer) (int64, error) {
-	s := fmt.Sprintf("%d %d R", r.ObjectNumber, r.GenerationNumber)
-	n, err := io.WriteString(w, s)
+	var buf [32]byte
+	b := strconv.AppendInt(buf[:0], int64(r.ObjectNumber), 10)
+	b = append(b, ' ')
+	b = strconv.AppendInt(b, int64(r.GenerationNumber), 10)
+	b = append(b, ' ', 'R')
+	n, err := w.Write(b)
 	return int64(n), err
 }
 
@@ -34,8 +38,12 @@ func (o *PdfIndirectObject) Type() ObjectType {
 
 func (o *PdfIndirectObject) WriteTo(w io.Writer) (int64, error) {
 	var total int64
-	s := fmt.Sprintf("%d %d obj\n", o.Reference.ObjectNumber, o.Reference.GenerationNumber)
-	n, err := io.WriteString(w, s)
+	var buf [40]byte
+	b := strconv.AppendInt(buf[:0], int64(o.Reference.ObjectNumber), 10)
+	b = append(b, ' ')
+	b = strconv.AppendInt(b, int64(o.Reference.GenerationNumber), 10)
+	b = append(b, ' ', 'o', 'b', 'j', '\n')
+	n, err := w.Write(b)
 	total += int64(n)
 	if err != nil {
 		return total, err

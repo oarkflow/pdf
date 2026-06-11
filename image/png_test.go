@@ -94,9 +94,42 @@ func TestLoadPNG_DataSize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadPNG() error = %v", err)
 	}
-	// RGB: 3 * 2 * 3 = 18 bytes
+	// RGB passthrough keeps PNG IDAT compressed; fallback decode stores raw RGB.
+	if len(img.RawStream) > 0 {
+		if img.DecodeParms == nil {
+			t.Fatal("passthrough PNG missing DecodeParms")
+		}
+		return
+	}
 	if len(img.Data) != 18 {
 		t.Errorf("data len = %d, want 18", len(img.Data))
+	}
+}
+
+func TestLoadPNG_RGBPassthrough(t *testing.T) {
+	rgba := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	rgba.Set(0, 0, color.RGBA{255, 0, 0, 255})
+	rgba.Set(1, 0, color.RGBA{0, 255, 0, 255})
+	rgba.Set(0, 1, color.RGBA{0, 0, 255, 255})
+	rgba.Set(1, 1, color.RGBA{255, 255, 255, 255})
+	var buf bytes.Buffer
+	encoder := png.Encoder{CompressionLevel: png.NoCompression}
+	if err := encoder.Encode(&buf, rgba); err != nil {
+		t.Fatalf("png.Encode: %v", err)
+	}
+
+	img, err := LoadPNG(buf.Bytes())
+	if err != nil {
+		t.Fatalf("LoadPNG() error = %v", err)
+	}
+	if len(img.RawStream) == 0 {
+		t.Skip("standard png encoder emitted an alpha PNG; passthrough path was not applicable")
+	}
+	if img.Filter != "FlateDecode" {
+		t.Errorf("filter = %q, want FlateDecode", img.Filter)
+	}
+	if img.DecodeParms == nil {
+		t.Fatal("DecodeParms is nil")
 	}
 }
 

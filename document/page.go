@@ -1,6 +1,9 @@
 package document
 
 import (
+	"fmt"
+	"sync"
+
 	"github.com/oarkflow/pdf/core"
 	"github.com/oarkflow/pdf/layout"
 )
@@ -38,6 +41,9 @@ type Page struct {
 	FontEntries map[string]layout.FontEntry
 	Images      map[string]layout.ImageEntry
 	Annotations []layout.LinkAnnotation
+	contentOnce sync.Once
+	contentData []byte
+	contentErr  error
 }
 
 // NewPage creates a new page with the given size.
@@ -49,4 +55,17 @@ func NewPage(size PageSize) *Page {
 		FontEntries: make(map[string]layout.FontEntry),
 		Images:      make(map[string]layout.ImageEntry),
 	}
+}
+
+// CompressedContents returns a cached Flate-compressed copy of the page content.
+func (p *Page) CompressedContents() ([]byte, error) {
+	p.contentOnce.Do(func() {
+		stream := core.NewStream(p.Contents)
+		if err := stream.Compress(); err != nil {
+			p.contentErr = fmt.Errorf("compressing page content: %w", err)
+			return
+		}
+		p.contentData = stream.Data
+	})
+	return p.contentData, p.contentErr
 }

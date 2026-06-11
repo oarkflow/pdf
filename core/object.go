@@ -11,7 +11,7 @@ import (
 type ObjectType int
 
 const (
-	ObjBoolean    ObjectType = iota
+	ObjBoolean ObjectType = iota
 	ObjInteger
 	ObjNumber
 	ObjString
@@ -58,7 +58,8 @@ type PdfInteger int64
 func (i PdfInteger) Type() ObjectType { return ObjInteger }
 
 func (i PdfInteger) WriteTo(w io.Writer) (int64, error) {
-	n, err := io.WriteString(w, strconv.FormatInt(int64(i), 10))
+	var buf [24]byte
+	n, err := w.Write(strconv.AppendInt(buf[:0], int64(i), 10))
 	return int64(n), err
 }
 
@@ -170,15 +171,39 @@ func nameNeedsEscape(c byte) bool {
 }
 
 func (nm PdfName) WriteTo(w io.Writer) (int64, error) {
+	needsEscape := false
+	for i := 0; i < len(nm); i++ {
+		if nameNeedsEscape(nm[i]) {
+			needsEscape = true
+			break
+		}
+	}
+	if !needsEscape {
+		if len(nm) < 64 {
+			var buf [64]byte
+			buf[0] = '/'
+			copy(buf[1:], nm)
+			n, err := w.Write(buf[:len(nm)+1])
+			return int64(n), err
+		}
+		n, err := io.WriteString(w, "/")
+		if err != nil {
+			return int64(n), err
+		}
+		n2, err := io.WriteString(w, string(nm))
+		return int64(n + n2), err
+	}
+
 	var buf strings.Builder
+	buf.Grow(len(nm) + 1)
 	buf.WriteByte('/')
 	for i := 0; i < len(nm); i++ {
 		c := nm[i]
 		if nameNeedsEscape(c) {
 			fmt.Fprintf(&buf, "#%02X", c)
-		} else {
-			buf.WriteByte(c)
+			continue
 		}
+		buf.WriteByte(c)
 	}
 	n, err := io.WriteString(w, buf.String())
 	return int64(n), err
