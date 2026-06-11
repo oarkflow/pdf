@@ -23,7 +23,18 @@ type CompiledHTML struct {
 	margins    document.Margins
 	metadata   document.Metadata
 	encryption *core.EncryptionConfig
+	pdfa       *document.PDFALevel
+	pdfua      *document.PDFUALevel
+	language   string
+	xmp        []byte
 	doc        *document.Document
+}
+
+// HTMLComplianceOptions controls standards-oriented HTML-to-PDF generation.
+type HTMLComplianceOptions struct {
+	PDFA     document.PDFALevel
+	PDFUA    document.PDFUALevel
+	Language string
 }
 
 // FrozenPDF is an immutable PDF byte artifact optimized for repeated writes.
@@ -31,8 +42,72 @@ type FrozenPDF struct {
 	data []byte
 }
 
-// CompileHTML prepares HTML content for repeated PDF generation.
+// DefaultHTMLComplianceOptions returns the default standards profile used by
+// compliant HTML generation.
+func DefaultHTMLComplianceOptions() HTMLComplianceOptions {
+	return HTMLComplianceOptions{
+		PDFA:     document.PDFA2b,
+		PDFUA:    document.PDFUA1,
+		Language: "en-US",
+	}
+}
+
+// CompileHTML prepares HTML content for repeated lean PDF generation.
+// It is equivalent to CompileLeanHTML and is kept for compatibility.
 func CompileHTML(htmlContent string, opts ...html.Options) (*CompiledHTML, error) {
+	return compileHTML(htmlContent, false, HTMLComplianceOptions{}, opts...)
+}
+
+// CompileLeanHTML prepares HTML content for repeated lean PDF generation.
+func CompileLeanHTML(htmlContent string, opts ...html.Options) (*CompiledHTML, error) {
+	return compileHTML(htmlContent, false, HTMLComplianceOptions{}, opts...)
+}
+
+// CompileCompliantHTML prepares HTML content for repeated compliant PDF
+// generation using DefaultHTMLComplianceOptions.
+func CompileCompliantHTML(htmlContent string, opts ...html.Options) (*CompiledHTML, error) {
+	return CompileCompliantHTMLWithOptions(htmlContent, DefaultHTMLComplianceOptions(), opts...)
+}
+
+// CompileCompliantHTMLWithOptions prepares HTML content for repeated compliant
+// PDF generation using the supplied compliance profile.
+func CompileCompliantHTMLWithOptions(htmlContent string, compliance HTMLComplianceOptions, opts ...html.Options) (*CompiledHTML, error) {
+	if compliance.Language == "" {
+		compliance.Language = "en-US"
+	}
+	return compileHTML(htmlContent, true, compliance, opts...)
+}
+
+// WriteLeanHTMLToPDF converts HTML content to a lean PDF and writes it to out.
+func WriteLeanHTMLToPDF(out io.Writer, htmlContent string, opts ...html.Options) error {
+	compiled, err := CompileLeanHTML(htmlContent, opts...)
+	if err != nil {
+		return err
+	}
+	return compiled.WriteStreamingTo(out)
+}
+
+// WriteCompliantHTMLToPDF converts HTML content to a compliant PDF using
+// DefaultHTMLComplianceOptions and writes it to out.
+func WriteCompliantHTMLToPDF(out io.Writer, htmlContent string, opts ...html.Options) error {
+	compiled, err := CompileCompliantHTML(htmlContent, opts...)
+	if err != nil {
+		return err
+	}
+	return compiled.WriteStreamingTo(out)
+}
+
+// WriteCompliantHTMLToPDFWithOptions converts HTML content to a compliant PDF
+// using the supplied compliance profile and writes it to out.
+func WriteCompliantHTMLToPDFWithOptions(out io.Writer, htmlContent string, compliance HTMLComplianceOptions, opts ...html.Options) error {
+	compiled, err := CompileCompliantHTMLWithOptions(htmlContent, compliance, opts...)
+	if err != nil {
+		return err
+	}
+	return compiled.WriteStreamingTo(out)
+}
+
+func compileHTML(htmlContent string, compliant bool, compliance HTMLComplianceOptions, opts ...html.Options) (*CompiledHTML, error) {
 	if htmlContent == "" {
 		return nil, errors.New("pdf: HTML content is empty")
 	}
@@ -40,18 +115,20 @@ func CompileHTML(htmlContent string, opts ...html.Options) (*CompiledHTML, error
 	if len(opts) > 0 {
 		opt = opts[0]
 	}
+	if compliant && opt.Encryption != nil {
+		return nil, errors.New("pdf: compliant HTML generation does not support encryption")
+	}
 
 	result, err := html.Convert(htmlContent, opt)
 	if err != nil {
 		return nil, fmt.Errorf("converting HTML: %w", err)
 	}
 
-	pages := layout.RenderPages(
-		result.Elements,
-		result.Config.Width, result.Config.Height,
-		result.Config.Margins[0], result.Config.Margins[1],
-		result.Config.Margins[2], result.Config.Margins[3],
-	)
+	render := layout.RenderPages
+	if compliant {
+		render = layout.RenderTaggedPages
+	}
+	pages := render(result.Elements, result.Config.Width, result.Config.Height, result.Config.Margins[0], result.Config.Margins[1], result.Config.Margins[2], result.Config.Margins[3])
 
 	meta := document.Metadata{}
 	if title, ok := result.Metadata["title"]; ok {
@@ -69,6 +146,12 @@ func CompileHTML(htmlContent string, opts ...html.Options) (*CompiledHTML, error
 		},
 		metadata:   meta,
 		encryption: opt.Encryption,
+	}
+	if compliant {
+		compiled.pdfa = &compliance.PDFA
+		compiled.pdfua = &compliance.PDFUA
+		compiled.language = compliance.Language
+		compiled.xmp = document.BuildComplianceXMPMetadata(meta, compiled.pdfa, compiled.pdfua)
 	}
 	compiled.doc, err = compiled.buildDocument()
 	if err != nil {
@@ -106,6 +189,18 @@ func (c *CompiledHTML) buildDocument() (*document.Document, error) {
 	if c.encryption != nil {
 		doc.SetEncryption(*c.encryption)
 	}
+	if c.pdfa != nil {
+		doc.SetPDFA(*c.pdfa)
+	}
+	if c.pdfua != nil {
+		doc.SetPDFUA(*c.pdfua)
+	}
+	if c.language != "" {
+		doc.SetLanguage(c.language)
+	}
+	if len(c.xmp) > 0 {
+		doc.SetXMPMetadata(c.xmp)
+	}
 
 	for _, pr := range c.pages {
 		p := document.NewPage(document.PageSize{Width: pr.Width, Height: pr.Height})
@@ -118,6 +213,7 @@ func (c *CompiledHTML) buildDocument() (*document.Document, error) {
 		}
 		applyExtGStates(p, pr.ExtGStates)
 		p.Annotations = pr.Links
+		p.Structure = append(p.Structure, pr.Structure...)
 		doc.AddPage(p)
 	}
 

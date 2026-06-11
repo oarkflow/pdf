@@ -41,6 +41,7 @@ type Page struct {
 	FontEntries map[string]layout.FontEntry
 	Images      map[string]layout.ImageEntry
 	Annotations []layout.LinkAnnotation
+	Structure   []layout.StructureElement
 	contentOnce sync.Once
 	contentData []byte
 	contentErr  error

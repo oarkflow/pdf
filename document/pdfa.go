@@ -29,7 +29,10 @@ func (d *Document) buildComplianceObjects(w *Writer) error {
 		if d.pdfuaLevel == nil {
 			return nil
 		}
-		xmp := buildComplianceXMPMetadata(d.metadata, nil, d.pdfuaLevel)
+		xmp := d.xmp
+		if len(xmp) == 0 {
+			xmp = buildComplianceXMPMetadata(d.metadata, nil, d.pdfuaLevel)
+		}
 		xmpStream := core.NewStream(xmp)
 		xmpStream.Dictionary.Set("Type", core.PdfName("Metadata"))
 		xmpStream.Dictionary.Set("Subtype", core.PdfName("XML"))
@@ -38,7 +41,10 @@ func (d *Document) buildComplianceObjects(w *Writer) error {
 	}
 
 	// 1. XMP metadata stream (must NOT be compressed per PDF/A).
-	xmp := buildComplianceXMPMetadata(d.metadata, d.pdfaLevel, d.pdfuaLevel)
+	xmp := d.xmp
+	if len(xmp) == 0 {
+		xmp = buildComplianceXMPMetadata(d.metadata, d.pdfaLevel, d.pdfuaLevel)
+	}
 	xmpStream := core.NewStream(xmp)
 	xmpStream.Dictionary.Set("Type", core.PdfName("Metadata"))
 	xmpStream.Dictionary.Set("Subtype", core.PdfName("XML"))
@@ -122,6 +128,12 @@ func buildPDFAXMPMetadata(meta Metadata, part int, conformance string) []byte {
 	return buildComplianceXMPMetadata(meta, &level, nil)
 }
 
+// BuildComplianceXMPMetadata generates XMP metadata with PDF/A and PDF/UA
+// identification for callers that compile reusable document plans.
+func BuildComplianceXMPMetadata(meta Metadata, pdfaLevel *PDFALevel, pdfuaLevel *PDFUALevel) []byte {
+	return buildComplianceXMPMetadata(meta, pdfaLevel, pdfuaLevel)
+}
+
 // buildComplianceXMPMetadata generates XMP metadata with PDF/A and PDF/UA identification.
 func buildComplianceXMPMetadata(meta Metadata, pdfaLevel *PDFALevel, pdfuaLevel *PDFUALevel) []byte {
 	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
@@ -154,6 +166,10 @@ func buildComplianceXMPMetadata(meta Metadata, pdfaLevel *PDFALevel, pdfuaLevel 
 	if pdfuaLevel != nil {
 		pdfuaFields = fmt.Sprintf("      <pdfuaid:part>%d</pdfuaid:part>\n", parsePDFUALevel(*pdfuaLevel))
 	}
+	var extensionFields string
+	if pdfaLevel != nil && pdfuaLevel != nil {
+		extensionFields = pdfuaExtensionSchema()
+	}
 
 	xmp := fmt.Sprintf(`<?xpacket begin="%s" id="W5M0MpCehiHzreSzNTczkc9d"?>
 <x:xmpmeta xmlns:x="adobe:ns:meta/">
@@ -161,9 +177,7 @@ func buildComplianceXMPMetadata(meta Metadata, pdfaLevel *PDFALevel, pdfuaLevel 
     <rdf:Description rdf:about=""
         xmlns:dc="http://purl.org/dc/elements/1.1/"
         xmlns:xmp="http://ns.adobe.com/xap/1.0/"
-        xmlns:pdf="http://ns.adobe.com/pdf/1.3/"
-        xmlns:pdfaid="http://www.aiim.org/pdfa/ns/id/"
-        xmlns:pdfuaid="http://www.aiim.org/pdfua/ns/id/">
+        xmlns:pdf="http://ns.adobe.com/pdf/1.3/">
       <dc:title>
         <rdf:Alt>
           <rdf:li xml:lang="x-default">%s</rdf:li>
@@ -177,8 +191,8 @@ func buildComplianceXMPMetadata(meta Metadata, pdfaLevel *PDFALevel, pdfuaLevel 
       <xmp:CreateDate>%s</xmp:CreateDate>
       <xmp:ModifyDate>%s</xmp:ModifyDate>
       <pdf:Producer>%s</pdf:Producer>
-%s%s
     </rdf:Description>
+%s%s%s
   </rdf:RDF>
 </x:xmpmeta>
 <?xpacket end="w"?>`,
@@ -187,11 +201,60 @@ func buildComplianceXMPMetadata(meta Metadata, pdfaLevel *PDFALevel, pdfuaLevel 
 		xmlEscape(creator),
 		now, now,
 		xmlEscape(producer),
-		pdfaFields,
-		pdfuaFields,
+		pdfaDescription(pdfaFields),
+		pdfuaDescription(pdfuaFields),
+		extensionFields,
 	)
 
 	return []byte(xmp)
+}
+
+func pdfaDescription(fields string) string {
+	if fields == "" {
+		return ""
+	}
+	return fmt.Sprintf(`    <rdf:Description rdf:about="" xmlns:pdfaid="http://www.aiim.org/pdfa/ns/id/">
+%s
+    </rdf:Description>
+`, strings.TrimRight(fields, "\n"))
+}
+
+func pdfuaDescription(fields string) string {
+	if fields == "" {
+		return ""
+	}
+	return fmt.Sprintf(`    <rdf:Description rdf:about="" xmlns:pdfuaid="http://www.aiim.org/pdfua/ns/id/">
+%s
+    </rdf:Description>
+`, strings.TrimRight(fields, "\n"))
+}
+
+func pdfuaExtensionSchema() string {
+	return `    <rdf:Description rdf:about=""
+        xmlns:pdfaExtension="http://www.aiim.org/pdfa/ns/extension/"
+        xmlns:pdfaSchema="http://www.aiim.org/pdfa/ns/schema#"
+        xmlns:pdfaProperty="http://www.aiim.org/pdfa/ns/property#">
+      <pdfaExtension:schemas>
+        <rdf:Bag>
+          <rdf:li rdf:parseType="Resource">
+            <pdfaSchema:schema>PDF/UA identification schema</pdfaSchema:schema>
+            <pdfaSchema:namespaceURI>http://www.aiim.org/pdfua/ns/id/</pdfaSchema:namespaceURI>
+            <pdfaSchema:prefix>pdfuaid</pdfaSchema:prefix>
+            <pdfaSchema:property>
+              <rdf:Seq>
+                <rdf:li rdf:parseType="Resource">
+                  <pdfaProperty:name>part</pdfaProperty:name>
+                  <pdfaProperty:valueType>Integer</pdfaProperty:valueType>
+                  <pdfaProperty:category>internal</pdfaProperty:category>
+                  <pdfaProperty:description>PDF/UA version identifier</pdfaProperty:description>
+                </rdf:li>
+              </rdf:Seq>
+            </pdfaSchema:property>
+          </rdf:li>
+        </rdf:Bag>
+      </pdfaExtension:schemas>
+    </rdf:Description>
+`
 }
 
 // sRGBICCProfile returns a minimal valid sRGB ICC profile.

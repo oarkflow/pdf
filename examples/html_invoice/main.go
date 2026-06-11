@@ -9,6 +9,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/base64"
 	"fmt"
 	"os"
@@ -170,31 +171,120 @@ func main() {
 		Margins:           [4]float64{40, 40, 50, 40},
 		UseTailwind:       true,
 	}
-	err = pdf.FromHTML(invoiceHTML, "invoice.pdf", baseOpt)
+	leanDir := filepath.Join("out", "lean")
+	compliantDir := filepath.Join("out", "compliant")
+	pdfa4Dir := filepath.Join("out", "pdfa4")
+	protectedDir := filepath.Join("out", "protected")
+	otherDir := filepath.Join("out", "other")
+	ensureOutputDirs(leanDir, compliantDir, pdfa4Dir, protectedDir, otherDir)
+	fmt.Println("Default compliant outputs are PDF/A-2B + PDF/UA-1 in out/compliant; PDF/A-4 outputs are in out/pdfa4 and need a PDF/A-4 validation profile.")
+
+	leanPath := filepath.Join(leanDir, "invoice_lean.pdf")
+	err = pdf.FromLeanHTML(invoiceHTML, leanPath, baseOpt)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Println("Generated invoice.pdf")
-	validateGeneratedPDF("invoice.pdf", "", "INVOICE", d.Number, d.From.Name, d.To.Name)
+	fmt.Printf("Generated %s\n", leanPath)
+	validateGeneratedPDF(leanPath, "", "INVOICE", d.Number, d.From.Name, d.To.Name)
 
-	streamFile, err := os.Create("invoice_streaming.pdf")
+	leanWriterPath := filepath.Join(leanDir, "invoice_lean_writer.pdf")
+	leanFile, err := os.Create(leanWriterPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating streaming invoice: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error creating lean writer invoice: %v\n", err)
 		os.Exit(1)
 	}
-	err = pdf.FromHTMLStreaming(invoiceHTML, streamFile, baseOpt)
-	closeErr := streamFile.Close()
+	err = pdf.WriteLeanHTMLToPDF(leanFile, invoiceHTML, baseOpt)
+	closeErr := leanFile.Close()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error generating streaming invoice: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error generating lean writer invoice: %v\n", err)
 		os.Exit(1)
 	}
 	if closeErr != nil {
-		fmt.Fprintf(os.Stderr, "Error closing streaming invoice: %v\n", closeErr)
+		fmt.Fprintf(os.Stderr, "Error closing lean writer invoice: %v\n", closeErr)
 		os.Exit(1)
 	}
-	fmt.Println("Generated invoice_streaming.pdf")
-	validateGeneratedPDF("invoice_streaming.pdf", "", "INVOICE", d.Number, d.From.Name, d.To.Name)
+	fmt.Printf("Generated %s\n", leanWriterPath)
+	validateGeneratedPDF(leanWriterPath, "", "INVOICE", d.Number, d.From.Name, d.To.Name)
+
+	compliantPath := filepath.Join(compliantDir, "invoice_compliant_pdfa2b_ua1.pdf")
+	err = pdf.FromCompliantHTML(invoiceHTML, compliantPath, baseOpt)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error generating compliant invoice: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("Generated %s (PDF/A-2B + PDF/UA-1)\n", compliantPath)
+	validateGeneratedPDF(compliantPath, "", "INVOICE", d.Number, d.From.Name, d.To.Name)
+
+	compliantWriterPath := filepath.Join(compliantDir, "invoice_compliant_writer_pdfa2b_ua1.pdf")
+	compliantFile, err := os.Create(compliantWriterPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating compliant writer invoice: %v\n", err)
+		os.Exit(1)
+	}
+	err = pdf.WriteCompliantHTMLToPDF(compliantFile, invoiceHTML, baseOpt)
+	closeErr = compliantFile.Close()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error generating compliant writer invoice: %v\n", err)
+		os.Exit(1)
+	}
+	if closeErr != nil {
+		fmt.Fprintf(os.Stderr, "Error closing compliant writer invoice: %v\n", closeErr)
+		os.Exit(1)
+	}
+	fmt.Printf("Generated %s (PDF/A-2B + PDF/UA-1)\n", compliantWriterPath)
+	validateGeneratedPDF(compliantWriterPath, "", "INVOICE", d.Number, d.From.Name, d.To.Name)
+
+	pdfa4ua2 := pdf.HTMLComplianceOptions{
+		PDFA:     pdf.PDFA4,
+		PDFUA:    pdf.PDFUA2,
+		Language: "en-US",
+	}
+	pdfa4ua2Path := filepath.Join(pdfa4Dir, "invoice_compliant_pdfa4_ua2.pdf")
+	err = pdf.FromCompliantHTMLWithOptions(invoiceHTML, pdfa4ua2Path, pdfa4ua2, baseOpt)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error generating PDF/A-4 + PDF/UA-2 invoice: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("Generated %s (PDF/A-4 + PDF/UA-2)\n", pdfa4ua2Path)
+	validateGeneratedPDF(pdfa4ua2Path, "", "INVOICE", d.Number, d.From.Name, d.To.Name)
+
+	customCompliance := pdf.HTMLComplianceOptions{
+		PDFA:     pdf.PDFA2b,
+		PDFUA:    pdf.PDFUA1,
+		Language: "en-US",
+	}
+	customCompliantPath := filepath.Join(compliantDir, "invoice_compliant_custom_pdfa2b_ua1.pdf")
+	err = pdf.FromCompliantHTMLWithOptions(invoiceHTML, customCompliantPath, customCompliance, baseOpt)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error generating custom compliant invoice: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("Generated %s (PDF/A-2B + PDF/UA-1)\n", customCompliantPath)
+	validateGeneratedPDF(customCompliantPath, "", "INVOICE", d.Number, d.From.Name, d.To.Name)
+
+	compiledLean, err := pdf.CompileLeanHTML(invoiceHTML, baseOpt)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error compiling lean invoice: %v\n", err)
+		os.Exit(1)
+	}
+	writeCompiledPDF(filepath.Join(leanDir, "invoice_compiled_lean.pdf"), compiledLean, "", "INVOICE", d.Number, d.From.Name, d.To.Name)
+	writeFrozenPDF(filepath.Join(leanDir, "invoice_frozen_lean.pdf"), compiledLean, "", "INVOICE", d.Number, d.From.Name, d.To.Name)
+
+	compiledCompliant, err := pdf.CompileCompliantHTML(invoiceHTML, baseOpt)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error compiling compliant invoice: %v\n", err)
+		os.Exit(1)
+	}
+	writeCompiledPDF(filepath.Join(compliantDir, "invoice_compiled_compliant_pdfa2b_ua1.pdf"), compiledCompliant, "", "INVOICE", d.Number, d.From.Name, d.To.Name)
+	writeFrozenPDF(filepath.Join(compliantDir, "invoice_frozen_compliant_pdfa2b_ua1.pdf"), compiledCompliant, "", "INVOICE", d.Number, d.From.Name, d.To.Name)
+
+	var compiledBuffer bytes.Buffer
+	if err := compiledCompliant.WriteStreamingTo(&compiledBuffer); err != nil {
+		fmt.Fprintf(os.Stderr, "Error writing compliant invoice to buffer: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("Generated compliant invoice in-memory (%d bytes)\n", compiledBuffer.Len())
 
 	protectedOpt := baseOpt
 	protectedOpt.Encryption = &core.EncryptionConfig{
@@ -203,13 +293,14 @@ func main() {
 		UserPassword:  "open-sesame",
 		Permissions:   0xFFFFF0C4,
 	}
-	err = pdf.FromHTML(invoiceHTML, "invoice_protected.pdf", protectedOpt)
+	protectedPath := filepath.Join(protectedDir, "invoice_protected.pdf")
+	err = pdf.FromLeanHTML(invoiceHTML, protectedPath, protectedOpt)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error generating protected invoice: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Println("Generated invoice_protected.pdf (password: open-sesame)")
-	validateGeneratedPDF("invoice_protected.pdf", "open-sesame", "INVOICE", d.Number, d.From.Name, d.To.Name)
+	fmt.Printf("Generated %s (password: open-sesame)\n", protectedPath)
+	validateGeneratedPDF(protectedPath, "open-sesame", "INVOICE", d.Number, d.From.Name, d.To.Name)
 
 	// Also generate PDF from the Tailwind-styled invoice.html file
 	htmlBytes, err := os.ReadFile("examples/html_invoice/invoice.html")
@@ -226,12 +317,13 @@ func main() {
 			UseTailwind:       true,
 			EnableJavaScript:  true,
 		}
-		err = pdf.FromHTML(string(htmlBytes), "invoice_tailwind.pdf", tailwindOpt)
+		tailwindPath := filepath.Join(leanDir, "invoice_tailwind.pdf")
+		err = pdf.FromLeanHTML(string(htmlBytes), tailwindPath, tailwindOpt)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error generating tailwind invoice: %v\n", err)
 		} else {
-			fmt.Println("Generated invoice_tailwind.pdf")
-			validateGeneratedPDF("invoice_tailwind.pdf", "", "Monthly Newsletter", "Latest Updates")
+			fmt.Printf("Generated %s\n", tailwindPath)
+			validateGeneratedPDF(tailwindPath, "", "Monthly Newsletter", "Latest Updates")
 		}
 
 		protectedTailwindOpt := tailwindOpt
@@ -241,17 +333,72 @@ func main() {
 			UserPassword:  "open-sesame",
 			Permissions:   0xFFFFF0C4,
 		}
-		err = pdf.FromHTML(string(htmlBytes), "invoice_tailwind_protected.pdf", protectedTailwindOpt)
+		tailwindProtectedPath := filepath.Join(protectedDir, "invoice_tailwind_protected.pdf")
+		err = pdf.FromLeanHTML(string(htmlBytes), tailwindProtectedPath, protectedTailwindOpt)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error generating protected tailwind invoice: %v\n", err)
 		} else {
-			fmt.Println("Generated invoice_tailwind_protected.pdf (password: open-sesame)")
-			validateGeneratedPDF("invoice_tailwind_protected.pdf", "open-sesame", "Monthly Newsletter", "Latest Updates")
+			fmt.Printf("Generated %s (password: open-sesame)\n", tailwindProtectedPath)
+			validateGeneratedPDF(tailwindProtectedPath, "open-sesame", "Monthly Newsletter", "Latest Updates")
 		}
 	}
 
 	// Generate passport sifarish patra (recommendation letter) PDF
 	generatePassportSifarish()
+}
+
+func writeCompiledPDF(path string, compiled *pdf.CompiledHTML, password string, requiredText ...string) {
+	f, err := os.Create(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating %s: %v\n", path, err)
+		os.Exit(1)
+	}
+	err = compiled.WriteStreamingTo(f)
+	closeErr := f.Close()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error generating %s: %v\n", path, err)
+		os.Exit(1)
+	}
+	if closeErr != nil {
+		fmt.Fprintf(os.Stderr, "Error closing %s: %v\n", path, closeErr)
+		os.Exit(1)
+	}
+	fmt.Printf("Generated %s\n", path)
+	validateGeneratedPDF(path, password, requiredText...)
+}
+
+func writeFrozenPDF(path string, compiled *pdf.CompiledHTML, password string, requiredText ...string) {
+	frozen, err := compiled.Freeze()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error freezing %s: %v\n", path, err)
+		os.Exit(1)
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating %s: %v\n", path, err)
+		os.Exit(1)
+	}
+	_, err = frozen.WriteTo(f)
+	closeErr := f.Close()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error generating %s: %v\n", path, err)
+		os.Exit(1)
+	}
+	if closeErr != nil {
+		fmt.Fprintf(os.Stderr, "Error closing %s: %v\n", path, closeErr)
+		os.Exit(1)
+	}
+	fmt.Printf("Generated %s\n", path)
+	validateGeneratedPDF(path, password, requiredText...)
+}
+
+func ensureOutputDirs(dirs ...string) {
+	for _, dir := range dirs {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating output directory %s: %v\n", dir, err)
+			os.Exit(1)
+		}
+	}
 }
 
 func validateGeneratedPDF(path, password string, requiredText ...string) {
@@ -399,8 +546,9 @@ func generatePassportSifarish() {
 		},
 	}
 
-	outputPath := envString("PASSPORT_OUTPUT", "passport_sifarish_patra.pdf")
-	if err = pdf.FromHTML(renderedHTML, outputPath, opt); err != nil {
+	ensureOutputDirs(filepath.Join("out", "other"))
+	outputPath := envString("PASSPORT_OUTPUT", filepath.Join("out", "other", "passport_sifarish_patra.pdf"))
+	if err = pdf.FromLeanHTML(renderedHTML, outputPath, opt); err != nil {
 		fmt.Fprintf(os.Stderr, "Error generating passport sifarish PDF: %v\n", err)
 		return
 	}

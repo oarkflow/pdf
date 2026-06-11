@@ -283,8 +283,10 @@ func (t *Table) placeRow(row TableRow, rowIdx int, colWidths []float64, rowHeigh
 		// Cell background and border block
 		cellBlock := PlacedBlock{
 			X: cellX, Y: y,
-			Width: localCellW, Height: localRowH,
-			Tag: "TD",
+			Width:      localCellW,
+			Height:     localRowH,
+			Tag:        "TD",
+			StructOnly: true,
 			Draw: func(ctx *DrawContext, x, pdfY float64) {
 				// Background
 				if localBg != nil {

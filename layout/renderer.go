@@ -9,17 +9,29 @@ type PageResult struct {
 	Images     map[string]ImageEntry
 	Links      []LinkAnnotation
 	ExtGStates map[string]ExtGState
+	Structure  []StructureElement
 	Width      float64
 	Height     float64
 }
 
 // RenderPages takes a list of elements and renders them across pages.
 func RenderPages(elements []Element, pageWidth, pageHeight, marginTop, marginRight, marginBottom, marginLeft float64) []PageResult {
+	return renderPages(elements, pageWidth, pageHeight, marginTop, marginRight, marginBottom, marginLeft, false)
+}
+
+// RenderTaggedPages renders pages with marked content and structure metadata.
+func RenderTaggedPages(elements []Element, pageWidth, pageHeight, marginTop, marginRight, marginBottom, marginLeft float64) []PageResult {
+	return renderPages(elements, pageWidth, pageHeight, marginTop, marginRight, marginBottom, marginLeft, true)
+}
+
+func renderPages(elements []Element, pageWidth, pageHeight, marginTop, marginRight, marginBottom, marginLeft float64, tagged bool) []PageResult {
 	availWidth := pageWidth - marginLeft - marginRight
 	availHeight := pageHeight - marginTop - marginBottom
 
 	var pages []PageResult
 	var currentCtx *DrawContext
+	var currentStruct []StructureElement
+	nextMCID := 0
 	cursorY := 0.0 // top-down offset within content area
 	remaining := availHeight
 
@@ -31,12 +43,21 @@ func RenderPages(elements []Element, pageWidth, pageHeight, marginTop, marginRig
 				Images:     currentCtx.Images,
 				Links:      currentCtx.Links,
 				ExtGStates: currentCtx.ExtGStates,
+				Structure:  currentStruct,
 				Width:      pageWidth,
 				Height:     pageHeight,
 			})
 		}
 		currentCtx = NewDrawContext(pageWidth, pageHeight)
+		currentStruct = nil
+		nextMCID = 0
+		if tagged {
+			currentCtx.WriteString("/Artifact BMC\n")
+		}
 		currentCtx.WriteString(fmt.Sprintf("1 1 1 rg 0 0 %.2f %.2f re f\n", pageWidth, pageHeight))
+		if tagged {
+			currentCtx.WriteString("EMC\n")
+		}
 		cursorY = 0
 		remaining = availHeight
 	}
@@ -49,13 +70,44 @@ func RenderPages(elements []Element, pageWidth, pageHeight, marginTop, marginRig
 		for _, b := range blocks {
 			absX := offsetX + b.X
 			absTopY := offsetY + b.Y
+			var mcid int
+			hasTag := tagged && b.Tag != ""
+			structOnly := hasTag && b.StructOnly
+			if hasTag && !structOnly {
+				mcid = nextMCID
+				nextMCID++
+				currentCtx.BeginMarkedContent(b.Tag, mcid)
+			} else if tagged && b.Draw != nil && structOnly {
+				currentCtx.WriteString("/Artifact BMC\n")
+			}
 			if b.Draw != nil {
 				// Transform top-down Y to PDF bottom-up Y
 				pdfY := pageHeight - absTopY
 				b.Draw(currentCtx, absX, pdfY)
 			}
+			if tagged && b.Draw != nil && structOnly {
+				currentCtx.WriteString("EMC\n")
+			}
+			beforeChildren := len(currentStruct)
 			if len(b.Children) > 0 {
 				drawBlocks(b.Children, absX, absTopY)
+			}
+			var children []StructureElement
+			if hasTag && len(currentStruct) > beforeChildren {
+				children = append(children, currentStruct[beforeChildren:]...)
+				currentStruct = currentStruct[:beforeChildren]
+			}
+			if hasTag {
+				if !structOnly {
+					currentCtx.EndMarkedContent()
+				}
+				currentStruct = append(currentStruct, StructureElement{
+					Type:     b.Tag,
+					MCID:     mcidForBlock(mcid, structOnly),
+					PageNum:  len(pages),
+					AltText:  b.AltText,
+					Children: children,
+				})
 			}
 		}
 	}
@@ -117,10 +169,18 @@ func RenderPages(elements []Element, pageWidth, pageHeight, marginTop, marginRig
 			Images:     currentCtx.Images,
 			Links:      currentCtx.Links,
 			ExtGStates: currentCtx.ExtGStates,
+			Structure:  currentStruct,
 			Width:      pageWidth,
 			Height:     pageHeight,
 		})
 	}
 
 	return pages
+}
+
+func mcidForBlock(mcid int, structOnly bool) int {
+	if structOnly {
+		return -1
+	}
+	return mcid
 }

@@ -32,6 +32,31 @@ type Image struct {
 	alphaErr    error
 }
 
+// FlattenAlphaOnWhite returns an image with any alpha channel composited over
+// white. It returns img unchanged when there is no alpha data to flatten.
+func (img *Image) FlattenAlphaOnWhite() *Image {
+	if img == nil || len(img.AlphaData) == 0 || img.ColorSpace != "DeviceRGB" || len(img.Data) != img.Width*img.Height*3 || len(img.AlphaData) != img.Width*img.Height {
+		return img
+	}
+	data := make([]byte, len(img.Data))
+	for i, a := range img.AlphaData {
+		src := i * 3
+		alpha := int(a)
+		inv := 255 - alpha
+		data[src] = byte((int(img.Data[src])*alpha + 255*inv + 127) / 255)
+		data[src+1] = byte((int(img.Data[src+1])*alpha + 255*inv + 127) / 255)
+		data[src+2] = byte((int(img.Data[src+2])*alpha + 255*inv + 127) / 255)
+	}
+	return &Image{
+		Width:       img.Width,
+		Height:      img.Height,
+		ColorSpace:  img.ColorSpace,
+		BitsPerComp: img.BitsPerComp,
+		Data:        data,
+		Filter:      "FlateDecode",
+	}
+}
+
 // FromGoImage converts a Go image.Image to our Image struct.
 func FromGoImage(img goimage.Image) *Image {
 	bounds := img.Bounds()

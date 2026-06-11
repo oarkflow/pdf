@@ -41,13 +41,16 @@ type Writer struct {
 	markInfo       bool
 	language       string
 	displayTitle   bool
+	flattenAlpha   bool
+	pdfVersion     string
 }
 
 // NewWriter creates a new Writer ready to accept objects.
 func NewWriter() *Writer {
 	return &Writer{
-		nextObj:  1,
-		fontObjs: make(map[string]int),
+		nextObj:    1,
+		fontObjs:   make(map[string]int),
+		pdfVersion: "1.7",
 	}
 }
 
@@ -181,6 +184,9 @@ func (w *Writer) AddPage(page *Page) (int, error) {
 	})
 	pageDict.Set("Contents", core.PdfIndirectReference{ObjectNumber: contentsNum})
 	pageDict.Set("Resources", res)
+	if len(page.Structure) > 0 {
+		pageDict.Set("StructParents", core.PdfInteger(len(w.pages)))
+	}
 	if page.Rotation != 0 {
 		pageDict.Set("Rotate", core.PdfInteger(int64(page.Rotation)))
 	}
@@ -192,6 +198,7 @@ func (w *Writer) AddPage(page *Page) (int, error) {
 			annotDict := core.NewDictionary()
 			annotDict.Set("Type", core.PdfName("Annot"))
 			annotDict.Set("Subtype", core.PdfName("Link"))
+			annotDict.Set("F", core.PdfInteger(4))
 			annotDict.Set("Rect", core.PdfArray{
 				core.PdfNumber(link.X1), core.PdfNumber(link.Y1),
 				core.PdfNumber(link.X2), core.PdfNumber(link.Y2),
@@ -217,6 +224,9 @@ func (w *Writer) AddPage(page *Page) (int, error) {
 func (w *Writer) addImageObject(img *pdfimage.Image) (int, error) {
 	if img == nil {
 		return 0, nil
+	}
+	if w.flattenAlpha {
+		img = img.FlattenAlphaOnWhite()
 	}
 
 	mainNum := w.nextObj
@@ -285,6 +295,16 @@ func (w *Writer) SetLanguage(lang string) { w.language = lang }
 
 // SetDisplayDocTitle controls /ViewerPreferences /DisplayDocTitle.
 func (w *Writer) SetDisplayDocTitle(display bool) { w.displayTitle = display }
+
+// SetFlattenAlpha controls whether images with soft masks are composited over white.
+func (w *Writer) SetFlattenAlpha(flatten bool) { w.flattenAlpha = flatten }
+
+// SetPDFVersion sets the PDF header version emitted by the writer.
+func (w *Writer) SetPDFVersion(version string) {
+	if version != "" {
+		w.pdfVersion = version
+	}
+}
 
 // PageRef returns an indirect reference for the page at the given 0-based index.
 func (w *Writer) PageRef(pageIndex int) core.PdfIndirectReference {
@@ -469,7 +489,10 @@ func (w *Writer) WriteTo(out io.Writer) (int64, error) {
 	var buf bytes.Buffer
 
 	// Header.
-	buf.WriteString("%PDF-1.7\n")
+	if w.pdfVersion == "" {
+		w.pdfVersion = "1.7"
+	}
+	fmt.Fprintf(&buf, "%%PDF-%s\n", w.pdfVersion)
 	buf.Write([]byte{'%', 0xE2, 0xE3, 0xCF, 0xD3, '\n'})
 
 	// Encrypt objects if encryption is configured.

@@ -5,6 +5,8 @@ import (
 	"encoding/xml"
 	"strings"
 	"testing"
+
+	"github.com/oarkflow/pdf/layout"
 )
 
 func TestPDFA1b_XMPContainsPart1(t *testing.T) {
@@ -86,6 +88,57 @@ func TestPDFUA2_XMPAndCatalogMarkers(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("expected %q", want)
 		}
+	}
+}
+
+func TestPDFAWithPDFUAIncludesExtensionSchema(t *testing.T) {
+	pdfa := PDFA2b
+	pdfua := PDFUA1
+	xmp := string(BuildComplianceXMPMetadata(Metadata{Title: "Extension Test"}, &pdfa, &pdfua))
+	for _, want := range []string{
+		"pdfaExtension:schemas",
+		"PDF/UA identification schema",
+		"pdfaSchema:namespaceURI>http://www.aiim.org/pdfua/ns/id/",
+		"pdfaProperty:name>part",
+		`xmlns:pdfaid="http://www.aiim.org/pdfa/ns/id/"`,
+		`xmlns:pdfuaid="http://www.aiim.org/pdfua/ns/id/"`,
+	} {
+		if !strings.Contains(xmp, want) {
+			t.Errorf("expected XMP extension schema to contain %q", want)
+		}
+	}
+}
+
+func TestPDFAWithPDFUAXMPWellFormedXML(t *testing.T) {
+	pdfa := PDFA2b
+	pdfua := PDFUA1
+	xmp := string(BuildComplianceXMPMetadata(Metadata{Title: "PDF/A + PDF/UA"}, &pdfa, &pdfua))
+
+	decoder := xml.NewDecoder(strings.NewReader(xmp))
+	for {
+		_, err := decoder.Token()
+		if err != nil {
+			if err.Error() == "EOF" {
+				break
+			}
+			t.Fatalf("XMP is not well-formed XML: %v", err)
+		}
+	}
+}
+
+func TestLinkAnnotationsHavePrintFlag(t *testing.T) {
+	doc, _ := NewDocument(A4)
+	page := NewPage(A4)
+	page.Contents = []byte("BT ET")
+	page.Annotations = append(page.Annotations, layout.LinkAnnotation{X1: 10, Y1: 10, X2: 20, Y2: 20, URI: "https://example.com"})
+	doc.AddPage(page)
+
+	var buf bytes.Buffer
+	if _, err := doc.WriteTo(&buf); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "/F 4") {
+		t.Fatal("expected link annotation to include /F 4")
 	}
 }
 

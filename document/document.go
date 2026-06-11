@@ -58,6 +58,7 @@ type Document struct {
 	margins    Margins
 	pages      []*Page
 	metadata   Metadata
+	xmp        []byte
 	header     PageDecorator
 	footer     PageDecorator
 	watermark  *WatermarkConfig
@@ -92,6 +93,7 @@ func (d *Document) SetHeader(fn PageDecorator)              { d.header = fn }
 func (d *Document) SetFooter(fn PageDecorator)              { d.footer = fn }
 func (d *Document) SetWatermark(cfg WatermarkConfig)        { d.watermark = &cfg }
 func (d *Document) SetMetadata(meta Metadata)               { d.metadata = meta }
+func (d *Document) SetXMPMetadata(xmp []byte)               { d.xmp = xmp }
 func (d *Document) SetEncryption(cfg core.EncryptionConfig) { d.encConfig = &cfg }
 func (d *Document) Pages() []*Page                          { return d.pages }
 func (d *Document) PageSize() PageSize                      { return d.pageSize }
@@ -110,6 +112,11 @@ func (d *Document) SetPDFUA(level PDFUALevel) {
 	if d.language == "" {
 		d.language = "en-US"
 	}
+}
+
+func (d *Document) requiresPDF20() bool {
+	return (d.pdfaLevel != nil && *d.pdfaLevel == PDFA4) ||
+		(d.pdfuaLevel != nil && *d.pdfuaLevel == PDFUA2)
 }
 
 // SetOutline sets the document outline (bookmarks).
@@ -164,6 +171,9 @@ func (d *Document) Save(path string) error {
 // WriteTo serializes the document as a complete PDF to w.
 func (d *Document) WriteTo(w io.Writer) (int64, error) {
 	wr := NewWriter()
+	if d.requiresPDF20() {
+		wr.SetPDFVersion("2.0")
+	}
 
 	// Set metadata if any field is non-empty.
 	info := make(map[string]string)
@@ -187,6 +197,9 @@ func (d *Document) WriteTo(w io.Writer) (int64, error) {
 	}
 	if len(info) > 0 {
 		wr.SetInfo(info)
+	}
+	if d.pdfaLevel != nil {
+		wr.SetFlattenAlpha(true)
 	}
 
 	total := len(d.pages)
@@ -216,6 +229,7 @@ func (d *Document) WriteTo(w io.Writer) (int64, error) {
 			FontEntries: page.FontEntries,
 			Images:      page.Images,
 			Annotations: page.Annotations,
+			Structure:   page.Structure,
 		}
 		if _, err := wr.AddPage(p); err != nil {
 			return 0, err
@@ -238,6 +252,11 @@ func (d *Document) WriteTo(w io.Writer) (int64, error) {
 
 	// Tagged PDF structure tree.
 	if d.tagged && d.structTree != nil {
+		if len(d.structTree.Root.Children) == 0 {
+			for _, page := range d.pages {
+				d.structTree.AddLayoutElements(page.Structure)
+			}
+		}
 		wr.SetMarkInfo(true)
 		rootObjNum := d.structTree.Build(wr)
 		if rootObjNum > 0 {
@@ -284,6 +303,9 @@ func (d *Document) WriteStreamingTo(w io.Writer) error {
 	if d.language != "" {
 		sw.SetLanguage(d.language)
 	}
+	if len(d.xmp) > 0 {
+		sw.SetXMPMetadata(d.xmp)
+	}
 
 	total := len(d.pages)
 	for i, page := range d.pages {
@@ -313,6 +335,7 @@ func (d *Document) WriteStreamingTo(w io.Writer) error {
 				FontEntries: page.FontEntries,
 				Images:      page.Images,
 				Annotations: page.Annotations,
+				Structure:   page.Structure,
 			}
 		}
 		if _, err := sw.AddPage(p); err != nil {

@@ -27,6 +27,17 @@ var (
 	Legal  = document.Legal
 )
 
+type PDFALevel = document.PDFALevel
+type PDFUALevel = document.PDFUALevel
+
+const (
+	PDFA1b = document.PDFA1b
+	PDFA2b = document.PDFA2b
+	PDFA4  = document.PDFA4
+	PDFUA1 = document.PDFUA1
+	PDFUA2 = document.PDFUA2
+)
+
 // Quick creates a simple PDF with text content and saves it to outputPath.
 func Quick(text string, outputPath string) error {
 	if outputPath == "" {
@@ -64,65 +75,46 @@ func Quick(text string, outputPath string) error {
 
 // FromHTML converts HTML content to a PDF file.
 func FromHTML(htmlContent string, outputPath string, opts ...html.Options) error {
+	return FromLeanHTML(htmlContent, outputPath, opts...)
+}
+
+// FromLeanHTML converts HTML content to a lean PDF file.
+func FromLeanHTML(htmlContent string, outputPath string, opts ...html.Options) error {
 	if htmlContent == "" {
 		return errors.New("pdf: HTML content is empty")
 	}
 	if outputPath == "" {
 		return errors.New("pdf: output path is empty")
 	}
-	var opt html.Options
-	if len(opts) > 0 {
-		opt = opts[0]
-	}
-
-	result, err := html.Convert(htmlContent, opt)
+	f, err := os.Create(outputPath)
 	if err != nil {
-		return fmt.Errorf("converting HTML: %w", err)
+		return err
 	}
+	defer f.Close()
+	return WriteLeanHTMLToPDF(f, htmlContent, opts...)
+}
 
-	doc, err := document.NewDocument(document.PageSize{
-		Width:  result.Config.Width,
-		Height: result.Config.Height,
-	})
+// FromCompliantHTML converts HTML content to a compliant PDF file using
+// DefaultHTMLComplianceOptions.
+func FromCompliantHTML(htmlContent string, outputPath string, opts ...html.Options) error {
+	return FromCompliantHTMLWithOptions(htmlContent, outputPath, DefaultHTMLComplianceOptions(), opts...)
+}
+
+// FromCompliantHTMLWithOptions converts HTML content to a compliant PDF file
+// using the supplied compliance profile.
+func FromCompliantHTMLWithOptions(htmlContent string, outputPath string, compliance HTMLComplianceOptions, opts ...html.Options) error {
+	if htmlContent == "" {
+		return errors.New("pdf: HTML content is empty")
+	}
+	if outputPath == "" {
+		return errors.New("pdf: output path is empty")
+	}
+	f, err := os.Create(outputPath)
 	if err != nil {
-		return fmt.Errorf("creating document: %w", err)
+		return err
 	}
-	doc.SetMargins(document.Margins{
-		Top:    result.Config.Margins[0],
-		Right:  result.Config.Margins[1],
-		Bottom: result.Config.Margins[2],
-		Left:   result.Config.Margins[3],
-	})
-
-	if title, ok := result.Metadata["title"]; ok {
-		doc.SetMetadata(document.Metadata{Title: title})
-	}
-	if opt.Encryption != nil {
-		doc.SetEncryption(*opt.Encryption)
-	}
-
-	pages := layout.RenderPages(
-		result.Elements,
-		result.Config.Width, result.Config.Height,
-		result.Config.Margins[0], result.Config.Margins[1],
-		result.Config.Margins[2], result.Config.Margins[3],
-	)
-
-	for _, pr := range pages {
-		p := document.NewPage(document.PageSize{Width: pr.Width, Height: pr.Height})
-		p.Contents = pr.Content
-		for _, fe := range pr.Fonts {
-			p.FontEntries[fe.PDFName] = fe
-		}
-		for name, ie := range pr.Images {
-			p.Images[name] = ie
-		}
-		applyExtGStates(p, pr.ExtGStates)
-		p.Annotations = pr.Links
-		doc.AddPage(p)
-	}
-
-	return doc.Save(outputPath)
+	defer f.Close()
+	return WriteCompliantHTMLToPDFWithOptions(f, htmlContent, compliance, opts...)
 }
 
 // ToHTML converts a PDF file to an HTML document.

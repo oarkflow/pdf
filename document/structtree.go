@@ -2,8 +2,10 @@ package document
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/oarkflow/pdf/core"
+	"github.com/oarkflow/pdf/layout"
 )
 
 // StructElement represents a node in the PDF structure tree.
@@ -38,6 +40,31 @@ func (t *StructureTree) AddElement(el *StructElement) {
 	t.Root.Children = append(t.Root.Children, el)
 }
 
+// AddLayoutElements appends tagged layout elements to the structure tree.
+func (t *StructureTree) AddLayoutElements(elements []layout.StructureElement) {
+	for _, el := range elements {
+		t.Root.Children = append(t.Root.Children, structElementFromLayout(el))
+		if el.MCID >= t.nextMCID {
+			t.nextMCID = el.MCID + 1
+		}
+	}
+}
+
+func structElementFromLayout(el layout.StructureElement) *StructElement {
+	out := &StructElement{
+		Type:       el.Type,
+		MCID:       el.MCID,
+		PageNum:    el.PageNum,
+		AltText:    el.AltText,
+		Lang:       el.Lang,
+		ActualText: el.ActualText,
+	}
+	for _, child := range el.Children {
+		out.Children = append(out.Children, structElementFromLayout(child))
+	}
+	return out
+}
+
 // NextMCID returns the next available marked content ID and increments the counter.
 func (t *StructureTree) NextMCID() int {
 	id := t.nextMCID
@@ -59,7 +86,7 @@ func (t *StructureTree) Build(w *Writer) int {
 
 	// We need page object numbers. The writer records them in w.pages.
 	// Collect all MCID-bearing elements for ParentTree construction.
-	var mcidElems []*mcidEntry
+	var mcidElems []mcidEntry
 
 	// Reserve an object number for the StructTreeRoot so children can reference it.
 	rootObjNum := w.ReserveObject()
@@ -85,10 +112,11 @@ func (t *StructureTree) Build(w *Writer) int {
 
 type mcidEntry struct {
 	mcid       int
+	pageNum    int
 	elemObjNum int
 }
 
-func (t *StructureTree) buildElement(w *Writer, el *StructElement, parentObjNum int, mcidElems *[]*mcidEntry) int {
+func (t *StructureTree) buildElement(w *Writer, el *StructElement, parentObjNum int, mcidElems *[]mcidEntry) int {
 	dict := core.NewDictionary()
 	dict.Set("Type", core.PdfName("StructElem"))
 	dict.Set("S", core.PdfName(el.Type))
@@ -107,25 +135,26 @@ func (t *StructureTree) buildElement(w *Writer, el *StructElement, parentObjNum 
 	objNum := w.ReserveObject()
 
 	if len(el.Children) > 0 {
-		// Container element: build children.
-		kids := make(core.PdfArray, 0, len(el.Children))
+		kids := make(core.PdfArray, 0, len(el.Children)+1)
+		if el.MCID >= 0 {
+			kids = append(kids, markedContentRef(el, w.pages))
+			*mcidElems = append(*mcidElems, mcidEntry{
+				mcid:       el.MCID,
+				pageNum:    el.PageNum,
+				elemObjNum: objNum,
+			})
+		}
 		for _, child := range el.Children {
 			childNum := t.buildElement(w, child, objNum, mcidElems)
 			kids = append(kids, ref(childNum))
 		}
 		dict.Set("K", kids)
 	} else if el.MCID >= 0 {
-		// Leaf element with marked content reference.
-		mcRef := core.NewDictionary()
-		mcRef.Set("Type", core.PdfName("MCR"))
-		mcRef.Set("MCID", core.PdfInteger(el.MCID))
-		if el.PageNum >= 0 && el.PageNum < len(w.pages) {
-			mcRef.Set("Pg", ref(w.pages[el.PageNum]))
-		}
-		dict.Set("K", mcRef)
+		dict.Set("K", markedContentRef(el, w.pages))
 
-		*mcidElems = append(*mcidElems, &mcidEntry{
+		*mcidElems = append(*mcidElems, mcidEntry{
 			mcid:       el.MCID,
+			pageNum:    el.PageNum,
 			elemObjNum: objNum,
 		})
 	}
@@ -134,15 +163,67 @@ func (t *StructureTree) buildElement(w *Writer, el *StructElement, parentObjNum 
 	return objNum
 }
 
-func (t *StructureTree) buildParentTree(w *Writer, entries []*mcidEntry) int {
-	// Number tree: Nums array with [key1 val1 key2 val2 ...]
-	nums := make(core.PdfArray, 0, len(entries)*2)
-	for _, e := range entries {
-		nums = append(nums, core.PdfInteger(e.mcid), ref(e.elemObjNum))
+func markedContentRef(el *StructElement, pages []int) *core.PdfDictionary {
+	return markedContentRefRaw(el.MCID, el.PageNum, pages)
+}
+
+func markedContentRefRaw(mcid, pageNum int, pages []int) *core.PdfDictionary {
+	mcRef := core.NewDictionaryCap(3)
+	mcRef.Set("Type", core.PdfName("MCR"))
+	mcRef.Set("MCID", core.PdfInteger(mcid))
+	if pageNum >= 0 && pageNum < len(pages) {
+		mcRef.Set("Pg", ref(pages[pageNum]))
 	}
+	return mcRef
+}
+
+func (t *StructureTree) buildParentTree(w *Writer, entries []mcidEntry) int {
 	dict := core.NewDictionary()
-	dict.Set("Nums", nums)
+	dict.Set("Nums", parentTreeNums(entries))
 	return w.AddObject(dict)
+}
+
+func parentTreeNums(entries []mcidEntry) core.PdfArray {
+	byPage := make(map[int]map[int]int)
+	for _, e := range entries {
+		pageNum := e.pageNum
+		if pageNum < 0 {
+			pageNum = 0
+		}
+		if byPage[pageNum] == nil {
+			byPage[pageNum] = make(map[int]int)
+		}
+		byPage[pageNum][e.mcid] = e.elemObjNum
+	}
+
+	keys := make([]int, 0, len(byPage))
+	for pageNum := range byPage {
+		keys = append(keys, pageNum)
+	}
+	sort.Ints(keys)
+
+	// Number tree: [StructParentsKey [elem-for-MCID-0 elem-for-MCID-1 ...] ...]
+	nums := make(core.PdfArray, 0, len(keys)*2)
+	for _, pageNum := range keys {
+		mcids := byPage[pageNum]
+		maxMCID := -1
+		for mcid := range mcids {
+			if mcid > maxMCID {
+				maxMCID = mcid
+			}
+		}
+		arr := make(core.PdfArray, maxMCID+1)
+		for i := range arr {
+			arr[i] = core.PdfNull{}
+		}
+		for mcid, elemObjNum := range mcids {
+			if mcid >= 0 {
+				arr[mcid] = ref(elemObjNum)
+			}
+		}
+		nums = append(nums, core.PdfInteger(pageNum), arr)
+	}
+	return nums
 }
 
 // BeginMarkedContent writes a BDC operator with the given tag and MCID to the content stream.

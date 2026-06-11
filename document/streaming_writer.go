@@ -22,11 +22,13 @@ type StreamingWriter struct {
 	counter  *countingWriter
 	offsets  map[int]int64 // object number -> byte offset
 	pages    []int         // page object numbers
+	pageTags [][]layout.StructureElement
 	nextObj  int
 	pagesObj int
 	fontObjs map[string]int
 	info     *core.PdfDictionary
 	metadata Metadata
+	xmpData  []byte
 	pdfa     *PDFALevel
 	pdfua    *PDFUALevel
 	lang     string
@@ -39,6 +41,8 @@ type StreamingWriter struct {
 	docIDPair      [2]core.PdfHexString
 	hasDocID       bool
 	finished       bool
+	pdfVersion     string
+	headerWritten  bool
 }
 
 func (sw *StreamingWriter) writeInt(v int) error {
@@ -70,28 +74,38 @@ func (sw *StreamingWriter) writeXrefOffset(offset int64) error {
 }
 
 // NewStreamingWriter creates a StreamingWriter that writes PDF output directly
-// to out. The PDF header is written immediately.
+// to out. The PDF header is written lazily before the first object so callers
+// can set compliance options that require a newer PDF version.
 func NewStreamingWriter(out io.Writer) (*StreamingWriter, error) {
 	cw := &countingWriter{w: out}
 	sw := &StreamingWriter{
-		counter:  cw,
-		offsets:  make(map[int]int64, 16),
-		fontObjs: make(map[string]int, 4),
-		pages:    make([]int, 0, 4),
-		nextObj:  1,
+		counter:    cw,
+		offsets:    make(map[int]int64, 16),
+		fontObjs:   make(map[string]int, 4),
+		pages:      make([]int, 0, 4),
+		nextObj:    1,
+		pdfVersion: "1.7",
 	}
 	sw.pagesObj = sw.allocObj()
 
-	// Write PDF header immediately.
-	if _, err := io.WriteString(cw, "%PDF-1.7\n"); err != nil {
-		return nil, err
-	}
-	// Binary comment to signal binary content.
-	if _, err := cw.Write([]byte{'%', 0xE2, 0xE3, 0xCF, 0xD3, '\n'}); err != nil {
-		return nil, err
-	}
-
 	return sw, nil
+}
+
+func (sw *StreamingWriter) ensureHeader() error {
+	if sw.headerWritten {
+		return nil
+	}
+	if sw.pdfVersion == "" {
+		sw.pdfVersion = "1.7"
+	}
+	if _, err := io.WriteString(sw.counter, "%PDF-"+sw.pdfVersion+"\n"); err != nil {
+		return err
+	}
+	if _, err := sw.counter.Write([]byte{'%', 0xE2, 0xE3, 0xCF, 0xD3, '\n'}); err != nil {
+		return err
+	}
+	sw.headerWritten = true
+	return nil
 }
 
 // allocObj reserves the next object number without writing anything.
@@ -103,6 +117,9 @@ func (sw *StreamingWriter) allocObj() int {
 
 // writeIndirectObject writes a single indirect object to the stream and records its offset.
 func (sw *StreamingWriter) writeIndirectObject(num int, obj core.PdfObject) error {
+	if err := sw.ensureHeader(); err != nil {
+		return err
+	}
 	sw.offsets[num] = sw.counter.written
 	ind := &core.PdfIndirectObject{
 		Reference: core.PdfIndirectReference{ObjectNumber: num, GenerationNumber: 0},
@@ -166,6 +183,9 @@ func (sw *StreamingWriter) addEmbeddedFont(entry layout.FontEntry) (int, error) 
 func (sw *StreamingWriter) addImageObject(img *pdfimage.Image) (int, error) {
 	if img == nil {
 		return 0, nil
+	}
+	if sw.pdfa != nil {
+		img = img.FlattenAlphaOnWhite()
 	}
 
 	mainNum := sw.allocObj()
@@ -290,6 +310,9 @@ func (sw *StreamingWriter) AddPage(page *Page) (int, error) {
 	})
 	pageDict.Set("Contents", core.PdfIndirectReference{ObjectNumber: contentsNum})
 	pageDict.Set("Resources", res)
+	if len(page.Structure) > 0 {
+		pageDict.Set("StructParents", core.PdfInteger(len(sw.pages)))
+	}
 	if page.Rotation != 0 {
 		pageDict.Set("Rotate", core.PdfInteger(int64(page.Rotation)))
 	}
@@ -301,6 +324,7 @@ func (sw *StreamingWriter) AddPage(page *Page) (int, error) {
 			annotDict := core.NewDictionaryCap(5)
 			annotDict.Set("Type", core.PdfName("Annot"))
 			annotDict.Set("Subtype", core.PdfName("Link"))
+			annotDict.Set("F", core.PdfInteger(4))
 			annotDict.Set("Rect", core.PdfArray{
 				core.PdfNumber(link.X1), core.PdfNumber(link.Y1),
 				core.PdfNumber(link.X2), core.PdfNumber(link.Y2),
@@ -326,6 +350,7 @@ func (sw *StreamingWriter) AddPage(page *Page) (int, error) {
 		return 0, err
 	}
 	sw.pages = append(sw.pages, num)
+	sw.pageTags = append(sw.pageTags, page.Structure)
 	return num, nil
 }
 
@@ -386,9 +411,17 @@ func (sw *StreamingWriter) SetMetadata(meta Metadata) {
 	sw.info = d
 }
 
+// SetXMPMetadata sets a prebuilt XMP packet for compliance metadata.
+func (sw *StreamingWriter) SetXMPMetadata(xmp []byte) {
+	sw.xmpData = xmp
+}
+
 // SetPDFA enables PDF/A conformance objects for the streamed document.
 func (sw *StreamingWriter) SetPDFA(level PDFALevel) {
 	sw.pdfa = &level
+	if level == PDFA4 {
+		sw.pdfVersion = "2.0"
+	}
 }
 
 // SetPDFUA enables PDF/UA conformance objects for the streamed document.
@@ -396,6 +429,9 @@ func (sw *StreamingWriter) SetPDFUA(level PDFUALevel) {
 	sw.pdfua = &level
 	sw.markInfo = true
 	sw.displayTitle = true
+	if level == PDFUA2 {
+		sw.pdfVersion = "2.0"
+	}
 	if sw.lang == "" {
 		sw.lang = "en-US"
 	}
@@ -411,7 +447,10 @@ func (sw *StreamingWriter) addComplianceObjects() error {
 		return nil
 	}
 
-	xmp := buildComplianceXMPMetadata(sw.metadata, sw.pdfa, sw.pdfua)
+	xmp := sw.xmpData
+	if len(xmp) == 0 {
+		xmp = buildComplianceXMPMetadata(sw.metadata, sw.pdfa, sw.pdfua)
+	}
 	xmpStream := core.NewStream(xmp)
 	xmpStream.Dictionary.Set("Type", core.PdfName("Metadata"))
 	xmpStream.Dictionary.Set("Subtype", core.PdfName("XML"))
@@ -462,20 +501,33 @@ func (sw *StreamingWriter) addMinimalStructTree() error {
 	}
 
 	rootNum := sw.allocObj()
-	docElemNum := sw.allocObj()
 	parentTreeNum := sw.allocObj()
 
+	maxMCID := -1
+	mcidElems := make([]mcidEntry, 0, countLayoutTags(sw.pageTags))
+	docElemNum := sw.allocObj()
+	kids := make(core.PdfArray, 0, countPageTags(sw.pageTags))
+	for pageNum, tags := range sw.pageTags {
+		for _, tag := range tags {
+			updateMaxLayoutMCID(tag, &maxMCID)
+			childNum, err := sw.writeStreamingLayoutStructElement(tag, pageNum, docElemNum, &mcidElems)
+			if err != nil {
+				return err
+			}
+			kids = append(kids, core.PdfIndirectReference{ObjectNumber: childNum})
+		}
+	}
 	docElem := core.NewDictionaryCap(4)
 	docElem.Set("Type", core.PdfName("StructElem"))
 	docElem.Set("S", core.PdfName("Document"))
 	docElem.Set("P", core.PdfIndirectReference{ObjectNumber: rootNum})
-	docElem.Set("K", core.PdfArray{})
+	docElem.Set("K", kids)
 	if err := sw.writeIndirectObject(docElemNum, docElem); err != nil {
 		return err
 	}
 
 	parentTree := core.NewDictionaryCap(1)
-	parentTree.Set("Nums", core.PdfArray{})
+	parentTree.Set("Nums", streamingParentTreeNums(mcidElems))
 	if err := sw.writeIndirectObject(parentTreeNum, parentTree); err != nil {
 		return err
 	}
@@ -484,12 +536,218 @@ func (sw *StreamingWriter) addMinimalStructTree() error {
 	root.Set("Type", core.PdfName("StructTreeRoot"))
 	root.Set("K", core.PdfIndirectReference{ObjectNumber: docElemNum})
 	root.Set("ParentTree", core.PdfIndirectReference{ObjectNumber: parentTreeNum})
-	root.Set("ParentTreeNextKey", core.PdfInteger(0))
+	root.Set("ParentTreeNextKey", core.PdfInteger(maxMCID+1))
 	if err := sw.writeIndirectObject(rootNum, root); err != nil {
 		return err
 	}
 	sw.structTreeRoot = rootNum
 	return nil
+}
+
+func streamingParentTreeNums(entries []mcidEntry) core.PdfArray {
+	if len(entries) == 0 {
+		return core.PdfArray{}
+	}
+	nums := make(core.PdfArray, 0, 8)
+	for i := 0; i < len(entries); {
+		pageNum := entries[i].pageNum
+		maxMCID := entries[i].mcid
+		j := i + 1
+		for j < len(entries) && entries[j].pageNum == pageNum {
+			if entries[j].mcid > maxMCID {
+				maxMCID = entries[j].mcid
+			}
+			j++
+		}
+		arr := make(core.PdfArray, maxMCID+1)
+		for idx := range arr {
+			arr[idx] = core.PdfNull{}
+		}
+		for k := i; k < j; k++ {
+			mcid := entries[k].mcid
+			if mcid >= 0 {
+				arr[mcid] = core.PdfIndirectReference{ObjectNumber: entries[k].elemObjNum}
+			}
+		}
+		nums = append(nums, core.PdfInteger(pageNum), arr)
+		i = j
+	}
+	return nums
+}
+
+func countPageTags(pages [][]layout.StructureElement) int {
+	total := 0
+	for _, tags := range pages {
+		total += len(tags)
+	}
+	return total
+}
+
+func countLayoutTags(pages [][]layout.StructureElement) int {
+	total := 0
+	for _, tags := range pages {
+		for _, tag := range tags {
+			total += countLayoutTag(tag)
+		}
+	}
+	return total
+}
+
+func countLayoutTag(el layout.StructureElement) int {
+	total := 1
+	for _, child := range el.Children {
+		total += countLayoutTag(child)
+	}
+	return total
+}
+
+func updateMaxLayoutMCID(el layout.StructureElement, max *int) {
+	if el.MCID > *max {
+		*max = el.MCID
+	}
+	for _, child := range el.Children {
+		updateMaxLayoutMCID(child, max)
+	}
+}
+
+func (sw *StreamingWriter) writeStreamingLayoutStructElement(el layout.StructureElement, pageNum, parentObjNum int, mcidElems *[]mcidEntry) (int, error) {
+	objNum := sw.allocObj()
+	var childBuf [8]int
+	var childNums []int
+	if len(el.Children) <= len(childBuf) {
+		childNums = childBuf[:0]
+	} else {
+		childNums = make([]int, 0, len(el.Children))
+	}
+	if len(el.Children) > 0 {
+		if el.MCID >= 0 {
+			*mcidElems = append(*mcidElems, mcidEntry{mcid: el.MCID, pageNum: pageNum, elemObjNum: objNum})
+		}
+		for _, child := range el.Children {
+			childNum, err := sw.writeStreamingLayoutStructElement(child, pageNum, objNum, mcidElems)
+			if err != nil {
+				return 0, err
+			}
+			childNums = append(childNums, childNum)
+		}
+	} else if el.MCID >= 0 {
+		*mcidElems = append(*mcidElems, mcidEntry{mcid: el.MCID, pageNum: pageNum, elemObjNum: objNum})
+	}
+
+	if err := sw.writeStructElementObject(objNum, parentObjNum, pageNum, el, childNums); err != nil {
+		return 0, err
+	}
+	return objNum, nil
+}
+
+func (sw *StreamingWriter) writeStructElementObject(num, parentObjNum, pageNum int, el layout.StructureElement, childNums []int) error {
+	sw.offsets[num] = sw.counter.written
+	if err := sw.writeObjHeader(num); err != nil {
+		return err
+	}
+	if _, err := io.WriteString(sw.counter, "<< /Type /StructElem /S /"); err != nil {
+		return err
+	}
+	if _, err := io.WriteString(sw.counter, el.Type); err != nil {
+		return err
+	}
+	if _, err := io.WriteString(sw.counter, " /P "); err != nil {
+		return err
+	}
+	if err := sw.writeRef(parentObjNum); err != nil {
+		return err
+	}
+	if el.AltText != "" {
+		if _, err := io.WriteString(sw.counter, " /Alt "); err != nil {
+			return err
+		}
+		if _, err := core.PdfString(el.AltText).WriteTo(sw.counter); err != nil {
+			return err
+		}
+	}
+	if el.Lang != "" {
+		if _, err := io.WriteString(sw.counter, " /Lang "); err != nil {
+			return err
+		}
+		if _, err := core.PdfString(el.Lang).WriteTo(sw.counter); err != nil {
+			return err
+		}
+	}
+	if el.ActualText != "" {
+		if _, err := io.WriteString(sw.counter, " /ActualText "); err != nil {
+			return err
+		}
+		if _, err := core.PdfString(el.ActualText).WriteTo(sw.counter); err != nil {
+			return err
+		}
+	}
+	if _, err := io.WriteString(sw.counter, " /K "); err != nil {
+		return err
+	}
+	if len(childNums) > 0 {
+		if _, err := io.WriteString(sw.counter, "["); err != nil {
+			return err
+		}
+		if el.MCID >= 0 {
+			if err := sw.writeMCR(el.MCID, pageNum); err != nil {
+				return err
+			}
+		}
+		for _, childNum := range childNums {
+			if _, err := io.WriteString(sw.counter, " "); err != nil {
+				return err
+			}
+			if err := sw.writeRef(childNum); err != nil {
+				return err
+			}
+		}
+		if _, err := io.WriteString(sw.counter, "]"); err != nil {
+			return err
+		}
+	} else if el.MCID >= 0 {
+		if err := sw.writeMCR(el.MCID, pageNum); err != nil {
+			return err
+		}
+	} else if _, err := io.WriteString(sw.counter, "[]"); err != nil {
+		return err
+	}
+	_, err := io.WriteString(sw.counter, " >>\nendobj\n")
+	return err
+}
+
+func (sw *StreamingWriter) writeObjHeader(num int) error {
+	if err := sw.writeInt(num); err != nil {
+		return err
+	}
+	_, err := io.WriteString(sw.counter, " 0 obj\n")
+	return err
+}
+
+func (sw *StreamingWriter) writeRef(num int) error {
+	if err := sw.writeInt(num); err != nil {
+		return err
+	}
+	_, err := io.WriteString(sw.counter, " 0 R")
+	return err
+}
+
+func (sw *StreamingWriter) writeMCR(mcid, pageNum int) error {
+	if _, err := io.WriteString(sw.counter, "<< /Type /MCR /MCID "); err != nil {
+		return err
+	}
+	if err := sw.writeInt(mcid); err != nil {
+		return err
+	}
+	if pageNum >= 0 && pageNum < len(sw.pages) {
+		if _, err := io.WriteString(sw.counter, " /Pg "); err != nil {
+			return err
+		}
+		if err := sw.writeRef(sw.pages[pageNum]); err != nil {
+			return err
+		}
+	}
+	_, err := io.WriteString(sw.counter, " >>")
+	return err
 }
 
 // Finish writes the pages tree, catalog, xref table, and trailer. It must be

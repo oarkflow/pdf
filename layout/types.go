@@ -34,8 +34,21 @@ type PlacedBlock struct {
 	X, Y, Width, Height float64
 	Draw                func(ctx *DrawContext, x, topY float64)
 	Tag                 string // PDF structure tag (P, H1, Table, etc.)
+	StructOnly          bool   // structure container without its own MCID
 	AltText             string
 	Children            []PlacedBlock
+}
+
+// StructureElement is the layout-level structure tree entry emitted when
+// tagged rendering is enabled.
+type StructureElement struct {
+	Type       string
+	MCID       int
+	PageNum    int
+	AltText    string
+	ActualText string
+	Lang       string
+	Children   []StructureElement
 }
 
 // LinkAnnotation represents a clickable link region on a page.

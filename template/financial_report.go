@@ -99,6 +99,7 @@ type CompiledFinancialReport struct {
 	pdfa       *document.PDFALevel
 	pdfua      *document.PDFUALevel
 	language   string
+	xmp        []byte
 	footerText string
 	sizeHint   int
 }
@@ -139,15 +140,26 @@ func CompileFinancialReport(data FinancialReportData) (*CompiledFinancialReport,
 		}
 	}
 
-	pages := layout.RenderPages(
-		elements,
-		data.PageSize.Width, data.PageSize.Height,
-		data.Margins.Top, data.Margins.Right, data.Margins.Bottom, data.Margins.Left,
-	)
+	render := layout.RenderPages
+	tagged := data.PDFUA != nil
+	if tagged {
+		render = layout.RenderTaggedPages
+	}
+	pages := render(elements, data.PageSize.Width, data.PageSize.Height, data.Margins.Top, data.Margins.Right, data.Margins.Bottom, data.Margins.Left)
 	if data.FooterText != "" {
-		appendFinancialFooter(pages, data.FooterText, data.Margins.Left)
+		appendFinancialFooter(pages, data.FooterText, data.Margins.Left, tagged)
 	}
 	docPages := financialDocumentPages(pages)
+
+	metadata := document.Metadata{
+		Title:   data.Title,
+		Subject: data.Subject,
+		Author:  data.Author,
+	}
+	var xmp []byte
+	if data.PDFA != nil || data.PDFUA != nil {
+		xmp = document.BuildComplianceXMPMetadata(metadata, data.PDFA, data.PDFUA)
+	}
 
 	return &CompiledFinancialReport{
 		elements: elements,
@@ -155,14 +167,11 @@ func CompileFinancialReport(data FinancialReportData) (*CompiledFinancialReport,
 		docPages: docPages,
 		pageSize: data.PageSize,
 		margins:  data.Margins,
-		metadata: document.Metadata{
-			Title:   data.Title,
-			Subject: data.Subject,
-			Author:  data.Author,
-		},
+		metadata: metadata,
 		pdfa:     data.PDFA,
 		pdfua:    data.PDFUA,
 		language: data.Language,
+		xmp:      xmp,
 		sizeHint: estimateFinancialReportSize(docPages),
 	}, nil
 }
@@ -215,6 +224,9 @@ func (c *CompiledFinancialReport) WriteStreamingTo(out io.Writer) error {
 	if c.language != "" {
 		sw.SetLanguage(c.language)
 	}
+	if len(c.xmp) > 0 {
+		sw.SetXMPMetadata(c.xmp)
+	}
 	for _, page := range c.docPages {
 		if _, err := sw.AddPage(page); err != nil {
 			return err
@@ -260,10 +272,16 @@ func estimateFinancialReportSize(pages []*document.Page) int {
 	return size
 }
 
-func appendFinancialFooter(pages []layout.PageResult, footer string, left float64) {
+func appendFinancialFooter(pages []layout.PageResult, footer string, left float64, tagged bool) {
 	var buf bytes.Buffer
+	if tagged {
+		buf.WriteString("/Artifact BMC\n")
+	}
 	buf.WriteString("0.35 0.40 0.45 rg BT /Helvetica 8 Tf ")
 	buf.WriteString(fmt.Sprintf("%.2f %.2f Td (%s) Tj ET\n", left, 22.0, escapeFooterText(footer)))
+	if tagged {
+		buf.WriteString("EMC\n")
+	}
 	footerBytes := buf.Bytes()
 	for i := range pages {
 		pages[i].Content = append(pages[i].Content, footerBytes...)
@@ -282,6 +300,7 @@ func financialDocumentPages(pages []layout.PageResult) []*document.Page {
 			p.Images[name] = ie
 		}
 		p.Annotations = pr.Links
+		p.Structure = append(p.Structure, pr.Structure...)
 		docPages = append(docPages, p)
 	}
 	return docPages

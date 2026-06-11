@@ -185,6 +185,9 @@ func TestDocument_WriteStreamingTo_ComplianceMarkers(t *testing.T) {
 
 	output := buf.String()
 	assertValidPDF(t, output)
+	if !strings.HasPrefix(output, "%PDF-2.0") {
+		t.Fatal("PDF/A-4 + PDF/UA-2 output should use PDF 2.0 header")
+	}
 	for _, want := range []string{
 		"<pdfaid:part>4</pdfaid:part>",
 		"<pdfuaid:part>2</pdfuaid:part>",
@@ -203,7 +206,7 @@ func TestDocument_WriteStreamingTo_ComplianceMarkers(t *testing.T) {
 func assertValidPDF(t *testing.T, output string) {
 	t.Helper()
 
-	if !strings.HasPrefix(output, "%PDF-1.7") {
+	if !strings.HasPrefix(output, "%PDF-") {
 		t.Error("missing PDF header")
 	}
 	if !strings.Contains(output, "xref") {
