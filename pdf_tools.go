@@ -240,31 +240,29 @@ func SearchText(inputPath string, opts SearchOptions) ([]SearchMatch, error) {
 
 // ValidatePDF performs basic structural validation and page-read checks.
 func ValidatePDF(inputPath, password string) ValidationResult {
-	result := ValidationResult{Path: inputPath}
-	if inputPath == "" {
-		result.Error = "input path is empty"
-		return result
+	report := ValidateCompliance(inputPath, ComplianceOptions{
+		Profiles: []ComplianceProfile{ProfilePDF},
+		Password: password,
+	})
+	result := ValidationResult{
+		Path:      inputPath,
+		Valid:     report.Valid,
+		Encrypted: report.Encrypted,
+		Pages:     report.Pages,
+		Error:     report.Error,
 	}
-	data, err := os.ReadFile(inputPath)
-	if err != nil {
-		result.Error = err.Error()
-		return result
-	}
-	if encrypted, _ := reader.IsEncrypted(data); encrypted {
-		result.Encrypted = true
-	}
-	r, err := reader.OpenWithPassword(data, password)
-	if err != nil {
-		result.Error = err.Error()
-		return result
-	}
-	result.Pages = r.NumPages()
-	for i := 0; i < r.NumPages(); i++ {
-		if _, err := r.Page(i); err != nil {
-			result.Warnings = append(result.Warnings, fmt.Sprintf("page %d: %v", i+1, err))
+	for _, issue := range report.Issues {
+		msg := issue.Message
+		if issue.Page > 0 {
+			msg = fmt.Sprintf("page %d: %s", issue.Page, msg)
 		}
+		if issue.Severity == IssueError && result.Error == "" {
+			result.Error = msg
+			result.Valid = false
+			continue
+		}
+		result.Warnings = append(result.Warnings, msg)
 	}
-	result.Valid = len(result.Warnings) == 0
 	return result
 }
 

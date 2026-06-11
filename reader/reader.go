@@ -242,6 +242,13 @@ func (r *Reader) Catalog() map[string]interface{} {
 	return r.catalog
 }
 
+// PageDictionaries returns the raw page dictionaries in document order.
+func (r *Reader) PageDictionaries() []map[string]interface{} {
+	pages := make([]map[string]interface{}, len(r.pages))
+	copy(pages, r.pages)
+	return pages
+}
+
 // GetResolver returns the underlying resolver for advanced use.
 func (r *Reader) GetResolver() *Resolver {
 	return r.resolver

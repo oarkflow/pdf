@@ -244,19 +244,28 @@ func infoCommand() *cli.Command {
 func validateCommand() *cli.Command {
 	return &cli.Command{
 		Name:      "validate",
-		Usage:     "Validate basic PDF structure",
+		Usage:     "Validate PDF structure and compliance profiles",
 		ArgsUsage: "<file.pdf>",
 		Category:  "Inspect and extract",
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "password", Usage: "PDF password"},
 			&cli.BoolFlag{Name: "prompt-password", Usage: "prompt for the PDF password"},
+			&cli.StringSliceFlag{Name: "profile", Aliases: []string{"p"}, Usage: "compliance profile: pdf, auto, pdfa-1b, pdfa-2b, pdfa-4, pdfua-1, pdfua-2, pdfx-*, pdfe-*, pdfvt-*, pades-*"},
+			&cli.BoolFlag{Name: "strict", Usage: "treat warnings as validation failures"},
+			&cli.StringFlag{Name: "external", Usage: "external validator adapter, e.g. verapdf"},
 			&cli.BoolFlag{Name: "json", Usage: "print JSON"},
 		},
 		Action: func(_ context.Context, cmd *cli.Command) error {
 			if cmd.NArg() < 1 {
 				return usageError("pdf validate [options] <file.pdf>")
 			}
-			result := pdf.ValidatePDF(cmd.Args().First(), passwordValue(cmd.String("password"), cmd.Bool("prompt-password")))
+			profiles := complianceProfilesFromCLI(cmd.StringSlice("profile"))
+			result := pdf.ValidateCompliance(cmd.Args().First(), pdf.ComplianceOptions{
+				Profiles: profiles,
+				Password: passwordValue(cmd.String("password"), cmd.Bool("prompt-password")),
+				Strict:   cmd.Bool("strict"),
+				External: cmd.String("external"),
+			})
 			if cmd.Bool("json") {
 				writeJSON(os.Stdout, result)
 				if !result.Valid {
@@ -268,20 +277,63 @@ func validateCommand() *cli.Command {
 			fmt.Printf("Valid: %t\n", result.Valid)
 			fmt.Printf("Encrypted: %t\n", result.Encrypted)
 			fmt.Printf("Pages: %d\n", result.Pages)
+			if len(result.Profiles) > 0 {
+				fmt.Printf("Profiles: %s\n", joinComplianceProfiles(result.Profiles))
+			}
+			if len(result.DetectedProfiles) > 0 {
+				fmt.Printf("Detected: %s\n", joinComplianceProfiles(result.DetectedProfiles))
+			}
 			if result.Error != "" {
 				fmt.Printf("Error: %s\n", result.Error)
 			}
-			if len(result.Warnings) > 0 {
-				fmt.Println("Warnings:")
-				for _, warning := range result.Warnings {
-					fmt.Printf("  - %s\n", warning)
-				}
+			if len(result.Issues) > 0 {
+				printComplianceIssues(result.Issues)
 			}
 			if !result.Valid {
 				return fmt.Errorf("PDF validation failed")
 			}
 			return nil
 		},
+	}
+}
+
+func complianceProfilesFromCLI(values []string) []pdf.ComplianceProfile {
+	if len(values) == 0 {
+		return []pdf.ComplianceProfile{pdf.ProfilePDF}
+	}
+	profiles := make([]pdf.ComplianceProfile, 0, len(values))
+	for _, value := range values {
+		profiles = append(profiles, pdf.ComplianceProfile(value))
+	}
+	return profiles
+}
+
+func joinComplianceProfiles(profiles []pdf.ComplianceProfile) string {
+	parts := make([]string, len(profiles))
+	for i, profile := range profiles {
+		parts[i] = string(profile)
+	}
+	return strings.Join(parts, ", ")
+}
+
+func printComplianceIssues(issues []pdf.ComplianceIssue) {
+	current := ""
+	for _, issue := range issues {
+		if issue.Severity != current {
+			current = issue.Severity
+			fmt.Printf("%s:\n", strings.Title(current))
+		}
+		prefix := "  -"
+		if issue.Profile != "" {
+			prefix += " [" + string(issue.Profile) + "]"
+		}
+		if issue.Clause != "" {
+			prefix += " " + issue.Clause + ":"
+		}
+		fmt.Printf("%s %s\n", prefix, issue.Message)
+		if issue.Suggestion != "" {
+			fmt.Printf("    Suggestion: %s\n", issue.Suggestion)
+		}
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/zlib"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -64,6 +65,20 @@ func NewResolver(data []byte) (*Resolver, error) {
 		return nil, err
 	}
 	return r, nil
+}
+
+// ObjectNumbers returns all non-free object numbers known to the resolver.
+func (r *Resolver) ObjectNumbers() []int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	nums := make([]int, 0, len(r.xref))
+	for num, entry := range r.xref {
+		if !entry.Free {
+			nums = append(nums, num)
+		}
+	}
+	sort.Ints(nums)
+	return nums
 }
 
 // Trailer returns the trailer dictionary.

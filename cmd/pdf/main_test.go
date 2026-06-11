@@ -7,7 +7,9 @@ import (
 	"image/color"
 	"image/png"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	pdfapi "github.com/oarkflow/pdf"
@@ -106,6 +108,45 @@ func TestCmdImagesToPDFSearchAndValidate(t *testing.T) {
 	runCmd(t, "pdf", "validate", textPDF)
 }
 
+func TestCmdValidateAutoJSON(t *testing.T) {
+	dir := t.TempDir()
+	textPDF := filepath.Join(dir, "text.pdf")
+	writeCmdTextPDF(t, textPDF, "validation target")
+
+	out, err := captureStdout(func() error {
+		return runCLI([]string{"pdf", "validate", "--profile", "auto", "--json", textPDF})
+	})
+	if err != nil {
+		t.Fatalf("validate auto json: %v\n%s", err, out)
+	}
+	var report pdfapi.ComplianceReport
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("invalid json: %v\n%s", err, out)
+	}
+	if !report.Valid || report.Pages != 1 {
+		t.Fatalf("unexpected report: %#v", report)
+	}
+}
+
+func TestCmdValidateMissingExternalVeraPDF(t *testing.T) {
+	if _, err := exec.LookPath("verapdf"); err == nil {
+		t.Skip("verapdf is installed")
+	}
+	dir := t.TempDir()
+	textPDF := filepath.Join(dir, "text.pdf")
+	writeCmdTextPDF(t, textPDF, "validation target")
+
+	out, err := captureStdout(func() error {
+		return runCLI([]string{"pdf", "validate", "--external", "verapdf", textPDF})
+	})
+	if err == nil {
+		t.Fatal("expected missing verapdf failure")
+	}
+	if !strings.Contains(out, "verapdf") {
+		t.Fatalf("expected verapdf message, got %s", out)
+	}
+}
+
 func TestCmdHelpTopics(t *testing.T) {
 	runCmd(t, "pdf", "help")
 	runCmd(t, "pdf", "merge", "--help")
@@ -118,6 +159,25 @@ func runCmd(t *testing.T, args ...string) {
 	if err := runCLI(args); err != nil {
 		t.Fatalf("%v: %v", args, err)
 	}
+}
+
+func captureStdout(fn func() error) (string, error) {
+	original := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		return "", err
+	}
+	os.Stdout = w
+	err = fn()
+	w.Close()
+	os.Stdout = original
+	var buf bytes.Buffer
+	_, copyErr := buf.ReadFrom(r)
+	r.Close()
+	if err != nil {
+		return buf.String(), err
+	}
+	return buf.String(), copyErr
 }
 
 func writeCmdTestPDF(t *testing.T, path string, pages int) {
