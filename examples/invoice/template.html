@@ -1,0 +1,619 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Invoice {{invoice_number}}</title>
+  <meta name="author" content="{{business_name}}">
+  <style>
+    :root {
+      --invoice-primary: #0b5e78;
+      --invoice-primary-dark: #12343b;
+      --invoice-text: #263238;
+      --invoice-table-text: #34464d;
+      --invoice-transaction-text: #455a64;
+      --invoice-muted: #607d87;
+      --invoice-soft-muted: #78909a;
+      --invoice-border: #d9e2e7;
+      --invoice-border-light: #e4ecef;
+      --invoice-accent-border: #c8d8de;
+      --invoice-card-border: #c8d8de;
+      --invoice-card-bg: #fbfcfd;
+      --invoice-surface-alt: #f7fafb;
+      --invoice-highlight: #eef6f8;
+      --invoice-paid: #2e7d32;
+      --invoice-paid-bg: #e8f5e9;
+      --invoice-unpaid: #b3261e;
+      --invoice-unpaid-bg: #fdecec;
+      --invoice-neutral-status: #607d87;
+      --invoice-neutral-status-bg: #eef3f5;
+      --invoice-white: #ffffff;
+    }
+
+    @page {
+      size: A4;
+      margin: 8px 10px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 0;
+      color: var(--invoice-text, #263238);
+      font-family: Helvetica, Arial, sans-serif;
+      font-size: 9pt;
+      line-height: 1.3;
+      background: var(--invoice-white, #ffffff);
+    }
+
+    a {
+      color: var(--invoice-primary, #0b5e78);
+      text-decoration: none;
+    }
+
+    .invoice-shell {
+      width: 100%;
+    }
+
+    .top-rule {
+      height: 5px;
+      background: var(--invoice-primary, #0b5e78);
+      margin-bottom: 12px;
+    }
+
+    .header {
+      display: flex;
+      align-items: flex-start;
+      border-bottom: 1px solid var(--invoice-border, #d9e2e7);
+      padding-bottom: 12px;
+      margin-bottom: 10px;
+    }
+
+    .brand {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .logo {
+      max-width: 140px;
+      max-height: 42px;
+      display: block;
+      margin-bottom: 6px;
+    }
+
+    .business-name {
+      font-size: 15pt;
+      font-weight: 700;
+      color: var(--invoice-primary-dark, #12343b);
+      margin-bottom: 4px;
+    }
+
+    .business-meta {
+      color: var(--invoice-muted, #607d87);
+      font-size: 8pt;
+    }
+
+    .invoice-title {
+      width: 260px;
+      text-align: right;
+    }
+
+    .invoice-heading-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 0;
+    }
+
+    .invoice-heading-table td {
+      border-bottom: none;
+      padding: 0;
+      vertical-align: middle;
+    }
+
+    .status-cell {
+      width: 94px;
+      text-align: right;
+    }
+
+    .title-cell {
+      text-align: right;
+    }
+
+    .status-ribbon {
+      width: 92px;
+      height: auto;
+      display: inline-block;
+    }
+
+    .invoice-title h1 {
+      margin: 0;
+      color: var(--invoice-primary, #0b5e78);
+      font-size: 21pt;
+      font-weight: 700;
+      letter-spacing: 0;
+      white-space: nowrap;
+    }
+
+    .invoice-number {
+      margin-top: 2px;
+      font-size: 9pt;
+      color: var(--invoice-muted, #607d87);
+    }
+
+    .balance-card {
+      margin-top: 8px;
+      padding: 7px 10px;
+      border: 1px solid var(--invoice-accent-border, #c8d8de);
+      background: var(--invoice-highlight, #eef6f8);
+      border-radius: 6px;
+    }
+
+    .balance-card .label {
+      color: var(--invoice-muted, #607d87);
+      font-size: 7pt;
+      text-transform: uppercase;
+      font-weight: 700;
+    }
+
+    .balance-card .value {
+      color: var(--invoice-primary-dark, #12343b);
+      font-size: 14pt;
+      font-weight: 700;
+      margin-top: 2px;
+    }
+
+    .invoice-meta {
+      width: 100%;
+      border-collapse: collapse;
+      border-bottom: 1px solid var(--invoice-border, #d9e2e7);
+      margin-bottom: 10px;
+    }
+
+    .invoice-meta td {
+      width: 25%;
+      padding: 0 10px;
+      text-align: center;
+      border-bottom: none;
+    }
+
+    .invoice-meta .label-row td {
+      padding-bottom: 2px;
+    }
+
+    .invoice-meta .value-row td {
+      padding-bottom: 8px;
+    }
+
+    .invoice-meta td:first-child {
+      text-align: left;
+    }
+
+    .invoice-meta td:last-child {
+      text-align: right;
+    }
+
+    .meta-label,
+    .section-label {
+      color: var(--invoice-primary, #0b5e78);
+      font-size: 7pt;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0;
+      margin-bottom: 2px;
+    }
+
+    .meta-value {
+      color: var(--invoice-primary-dark, #12343b);
+      font-weight: 700;
+      font-size: 8.6pt;
+    }
+
+    .parties {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .party {
+      flex: 1;
+      border: 1px solid var(--invoice-card-border, #c8d8de);
+      border-radius: 6px;
+      padding: 8px 10px;
+      background: var(--invoice-card-bg, #fbfcfd);
+    }
+
+    .party-name {
+      color: var(--invoice-primary-dark, #12343b);
+      font-weight: 700;
+      font-size: 9.8pt;
+      margin-bottom: 3px;
+    }
+
+    .party-detail {
+      color: var(--invoice-muted, #607d87);
+      font-size: 8pt;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .items th {
+      background: var(--invoice-primary-dark, #12343b);
+      color: var(--invoice-white, #ffffff);
+      padding: 6px 7px;
+      font-size: 7pt;
+      text-align: left;
+      text-transform: uppercase;
+      font-weight: 700;
+    }
+
+    .items th.num,
+    .items td.num {
+      text-align: right;
+    }
+
+    .items th.index,
+    .items td.index {
+      width: 34px;
+      text-align: center;
+    }
+
+    .items td {
+      padding: 7px;
+      border-bottom: 1px solid var(--invoice-border-light, #e4ecef);
+      vertical-align: top;
+      color: var(--invoice-table-text, #34464d);
+    }
+
+    .items .muted td {
+      background: var(--invoice-surface-alt, #f7fafb);
+    }
+
+    .item-title {
+      color: var(--invoice-primary-dark, #12343b);
+      font-weight: 700;
+    }
+
+    .item-detail {
+      color: var(--invoice-soft-muted, #78909a);
+      font-size: 7.7pt;
+    }
+
+    .strong {
+      font-weight: 700;
+      color: var(--invoice-primary-dark, #12343b);
+    }
+
+    .summary-wrap {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      margin-top: 10px;
+      margin-bottom: 10px;
+    }
+
+    .note {
+      flex: 1.25;
+      border-left: 4px solid var(--invoice-primary, #0b5e78);
+      padding: 6px 9px;
+      background: var(--invoice-surface-alt, #f7fafb);
+      color: var(--invoice-muted, #607d87);
+    }
+
+    .note strong {
+      display: block;
+      color: var(--invoice-primary-dark, #12343b);
+      margin-bottom: 3px;
+    }
+
+    .totals {
+      flex: 0.8;
+      border: 1px solid var(--invoice-card-border, #c8d8de);
+      border-radius: 6px;
+      overflow: hidden;
+      background: var(--invoice-card-bg, #fbfcfd);
+    }
+
+    .total-row {
+      display: flex;
+      padding: 5px 8px;
+      border-bottom: 1px solid var(--invoice-border-light, #e4ecef);
+    }
+
+    .total-row .name {
+      flex: 1;
+      color: var(--invoice-muted, #607d87);
+    }
+
+    .total-row .amount {
+      width: 100px;
+      text-align: right;
+      color: var(--invoice-primary-dark, #12343b);
+      font-weight: 700;
+    }
+
+    .total-row.balance {
+      background: var(--invoice-primary, #0b5e78);
+      border-bottom: none;
+      padding: 7px 8px;
+    }
+
+    .total-row.balance .name,
+    .total-row.balance .amount {
+      color: var(--invoice-white, #ffffff);
+      font-size: 9.8pt;
+      font-weight: 700;
+    }
+
+    .subsection {
+      margin-top: 10px;
+    }
+
+    .transactions th {
+      padding: 5px 7px;
+      text-align: left;
+      background: var(--invoice-highlight, #eef6f8);
+      color: var(--invoice-primary, #0b5e78);
+      font-size: 7pt;
+      text-transform: uppercase;
+    }
+
+    .transactions td {
+      padding: 5px 7px;
+      border-bottom: 1px solid var(--invoice-border-light, #e4ecef);
+      color: var(--invoice-transaction-text, #455a64);
+      font-size: 8pt;
+    }
+
+    .transactions .num {
+      text-align: right;
+    }
+
+    .transactions .empty {
+      text-align: center;
+      color: var(--invoice-soft-muted, #78909a);
+    }
+
+    .document-footer {
+      margin-top: 120px;
+      page-break-inside: avoid;
+    }
+
+    .footer-grid {
+      display: flex;
+      gap: 10px;
+    }
+
+    .footer-box {
+      flex: 1;
+      border: 1px solid var(--invoice-card-border, #c8d8de);
+      border-radius: 6px;
+      padding: 8px 10px;
+      background: var(--invoice-card-bg, #fbfcfd);
+      color: var(--invoice-muted, #607d87);
+      font-size: 8pt;
+    }
+
+    .footer-box strong {
+      color: var(--invoice-primary-dark, #12343b);
+    }
+
+    .bottom-bar {
+      border-top: 1px solid var(--invoice-border, #d9e2e7);
+      margin-top: 8px;
+      padding-top: 6px;
+      text-align: center;
+      color: var(--invoice-soft-muted, #78909a);
+      font-size: 7pt;
+      page-break-inside: avoid;
+    }
+
+  </style>
+</head>
+<body>
+  <div class="invoice-shell">
+    <div class="top-rule"></div>
+
+    <div class="header">
+      <div class="brand">
+        {{ if business_logo_src }}
+        <img class="logo" src="{{business_logo_src}}" alt="{{business_name}} logo">
+        {{ end }}
+        <div class="business-name">{{business_name}}</div>
+        <div class="business-meta">
+          {{business_address1}}<br>
+          {{ if business_address2 }}{{business_address2}}<br>{{ end }}
+          {{ if business_city_line }}{{business_city_line}}<br>{{ end }}
+          {{business_country}}<br>
+          <a href="{{business_phone_href}}">{{business_phone}}</a> | <a href="{{business_email_href}}">{{business_email}}</a> | <a href="{{business_website_href}}">{{business_website}}</a>
+        </div>
+      </div>
+      <div class="invoice-title">
+        <table class="invoice-heading-table">
+          <tr>
+            <td class="status-cell">
+              <img class="status-ribbon" src="{{invoice_status_svg}}" alt="{{invoice_status_upper}}">
+            </td>
+            <td class="title-cell"><h1>INVOICE</h1></td>
+          </tr>
+        </table>
+        <div class="invoice-number">{{invoice_number}}</div>
+        <div class="balance-card">
+          <div class="label">Balance Due</div>
+          <div class="value">{{balance_due}}</div>
+        </div>
+      </div>
+    </div>
+
+    <table class="invoice-meta">
+      <tr class="label-row">
+      <td>
+        <div class="meta-label">Invoice Date</div>
+      </td>
+      <td>
+        <div class="meta-label">Due Date</div>
+      </td>
+      <td>
+        <div class="meta-label">Terms</div>
+      </td>
+      <td>
+        <div class="meta-label">Currency</div>
+      </td>
+      </tr>
+      <tr class="value-row">
+      <td>
+        <div class="meta-value">{{invoice_date}}</div>
+      </td>
+      <td>
+        <div class="meta-value">{{invoice_due_date}}</div>
+      </td>
+      <td>
+        <div class="meta-value">{{payment_terms}}</div>
+      </td>
+      <td>
+        <div class="meta-value">{{currency}}</div>
+      </td>
+      </tr>
+    </table>
+
+    <div class="parties">
+      <div class="party">
+        <div class="section-label">Bill From</div>
+        <div class="party-name">{{business_name}}</div>
+        <div class="party-detail">
+          {{business_address1}}<br>
+          {{ if business_address2 }}{{business_address2}}<br>{{ end }}
+          {{ if business_city_line }}{{business_city_line}}<br>{{ end }}
+          {{business_country}}<br>
+          <a href="{{business_phone_href}}">{{business_phone}}</a><br>
+          <a href="{{business_email_href}}">{{business_email}}</a><br>
+          Tax ID: {{business_tax_id}}
+        </div>
+      </div>
+      <div class="party">
+        <div class="section-label">Bill To</div>
+        <div class="party-name">{{customer_name}}</div>
+        <div class="party-detail">
+          {{customer_address1}}<br>
+          {{ if customer_address2 }}{{customer_address2}}<br>{{ end }}
+          {{ if customer_city_line }}{{customer_city_line}}<br>{{ end }}
+          {{customer_country}}<br>
+          {{ if customer_phone }}<a href="{{customer_phone_href}}">{{customer_phone}}</a><br>{{ end }}
+          {{ if customer_email }}<a href="{{customer_email_href}}">{{customer_email}}</a>{{ end }}
+        </div>
+      </div>
+    </div>
+
+    <table class="items">
+      <thead>
+        <tr>
+          <th class="index">SN</th>
+          <th>Description</th>
+          <th class="num">Qty</th>
+          <th class="num">Rate</th>
+          <th class="num">Amount</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{ range item in items }}
+        <tr>
+          <td class="index">{{ $item.sn }}</td>
+          <td>
+            <span class="item-title">{{ $item.description }}</span><br>
+            <span class="item-detail">{{ $item.details }}</span>
+          </td>
+          <td class="num">{{ $item.quantity }}</td>
+          <td class="num">{{ $item.unit_price }}</td>
+          <td class="num strong">{{ $item.amount }}</td>
+        </tr>
+        {{ end }}
+      </tbody>
+    </table>
+
+    <div class="summary-wrap">
+      <div class="note">
+        <strong>Notes / Remarks</strong>
+        {{note}}
+      </div>
+      <div class="totals">
+        <div class="total-row">
+          <div class="name">Subtotal</div>
+          <div class="amount">{{subtotal}}</div>
+        </div>
+        <div class="total-row">
+          <div class="name">Tax ({{tax_rate}}%)</div>
+          <div class="amount">{{tax}}</div>
+        </div>
+        <div class="total-row">
+          <div class="name">Total</div>
+          <div class="amount">{{total}}</div>
+        </div>
+        <div class="total-row">
+          <div class="name">Payments</div>
+          <div class="amount">-{{paid}}</div>
+        </div>
+        <div class="total-row balance">
+          <div class="name">Amount Due</div>
+          <div class="amount">{{balance_due}}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="subsection">
+      <div class="section-label">Transactions</div>
+      <table class="transactions">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Method</th>
+            <th>Description</th>
+            <th class="num">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{ range transaction in transactions }}
+          <tr>
+            <td>{{ $transaction.date }}</td>
+            <td>{{ $transaction.payment_method }}</td>
+            <td>{{ $transaction.description }}</td>
+            <td class="num strong">-{{ $transaction.amount }}</td>
+          </tr>
+          {{ end }}
+          {{ if no_transactions }}
+          <tr>
+            <td colspan="4" class="empty">No payments recorded for this invoice.</td>
+          </tr>
+          {{ end }}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="document-footer">
+      <div class="footer-grid">
+        <div class="footer-box">
+          <div class="section-label">Payment Details</div>
+          <strong>Beneficiary:</strong> {{bank_account_name}}<br>
+          <strong>Account No:</strong> {{bank_account_number}}<br>
+          <strong>Bank:</strong> {{bank_name}}<br>
+          <strong>Address:</strong> {{bank_address}}<br>
+          <strong>SWIFT:</strong> {{bank_swift_code}}
+        </div>
+        <div class="footer-box">
+          <div class="section-label">Contact Information</div>
+          <strong>{{contact_name}}</strong><br>
+          <a href="{{contact_email_href}}">{{contact_email}}</a><br>
+          <a href="{{contact_phone_href}}">{{contact_phone}}</a>
+        </div>
+      </div>
+
+      <div class="bottom-bar">
+        {{business_name}} | <a href="{{business_email_href}}">{{business_email}}</a> | {{business_tax_id}}
+      </div>
+    </div>
+  </div>
+</body>
+</html>
