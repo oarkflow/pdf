@@ -14,6 +14,9 @@ import (
 	"github.com/oarkflow/pdf"
 	"github.com/oarkflow/pdf/barcode"
 	"github.com/oarkflow/pdf/document"
+	pdfhtml "github.com/oarkflow/pdf/html"
+	"github.com/oarkflow/pdf/layout"
+	pdftemplate "github.com/oarkflow/pdf/template"
 )
 
 func main() {
@@ -67,7 +70,7 @@ func main() {
 		exitErr(err)
 	}
 	mustWrite(agreementJSON, agreementJSONBytes)
-	if err := pdf.FromHTMLTemplateJSONFile(outTemplateHTML, agreementJSON, filledTemplatePDF); err != nil {
+	if err := renderAgreementPDF(outTemplateHTML, agreementData, filledTemplatePDF); err != nil {
 		exitErr(err)
 	}
 
@@ -160,6 +163,66 @@ func injectAgreementImageData(agreementData map[string]any, logoDataURI, qrCodeD
 	if clientSignatory != nil {
 		clientSignatory["signature_image"] = qrCodeDataURI
 	}
+}
+
+func renderAgreementPDF(templatePath string, agreementData map[string]any, outputPath string) error {
+	renderedHTML, err := pdftemplate.RenderHTMLFile(templatePath, agreementData)
+	if err != nil {
+		return fmt.Errorf("rendering agreement template: %w", err)
+	}
+
+	result, err := pdfhtml.Convert(renderedHTML, pdfhtml.Options{
+		DefaultFontSize:   10.5,
+		DefaultFontFamily: "Helvetica",
+		MediaType:         "print",
+	})
+	if err != nil {
+		return fmt.Errorf("converting agreement HTML: %w", err)
+	}
+
+	doc, err := document.NewDocument(document.PageSize{Width: result.Config.Width, Height: result.Config.Height})
+	if err != nil {
+		return err
+	}
+	doc.SetMargins(document.Margins{
+		Top:    result.Config.Margins[0],
+		Right:  result.Config.Margins[1],
+		Bottom: result.Config.Margins[2],
+		Left:   result.Config.Margins[3],
+	})
+
+	hasHF := len(result.HeaderElements) > 0 || len(result.FooterElements) > 0
+	var pages []layout.PageResult
+	if hasHF {
+		pages = layout.RenderPagesWithHeaderFooter(
+			result.Elements, result.HeaderElements, result.FooterElements,
+			result.Config.Width, result.Config.Height,
+			result.Config.Margins[0], result.Config.Margins[1],
+			result.Config.Margins[2], result.Config.Margins[3],
+		)
+	} else {
+		pages = layout.RenderPages(
+			result.Elements,
+			result.Config.Width, result.Config.Height,
+			result.Config.Margins[0], result.Config.Margins[1],
+			result.Config.Margins[2], result.Config.Margins[3],
+		)
+	}
+
+	for _, pr := range pages {
+		page := document.NewPage(document.PageSize{Width: pr.Width, Height: pr.Height})
+		page.Contents = pr.Content
+		for _, fe := range pr.Fonts {
+			page.FontEntries[fe.PDFName] = fe
+		}
+		for name, ie := range pr.Images {
+			page.Images[name] = ie
+		}
+		page.Annotations = pr.Links
+		doc.AddPage(page)
+	}
+
+	return doc.Save(outputPath)
 }
 
 func writeTextPDF(path, text string) {

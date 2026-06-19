@@ -133,13 +133,14 @@ func (e *DivElement) PlanLayout(area layout.LayoutArea) layout.LayoutPlan {
 	childY := 0.0
 	remaining := childHeight
 	var overflowChildren []layout.Element
+	avoidBreak := e.Style != nil && e.Style.PageBreakInside == "avoid"
 
 	for i, child := range e.Children {
 		childPlan := child.PlanLayout(layout.LayoutArea{Width: innerWidth, Height: remaining})
 		switch childPlan.Status {
 		case layout.LayoutFull:
 			if childPlan.Consumed > remaining {
-				if childY == 0 {
+				if childY == 0 || avoidBreak {
 					return layout.LayoutPlan{Status: layout.LayoutNothing}
 				}
 				overflowChildren = e.Children[i:]
@@ -153,6 +154,9 @@ func (e *DivElement) PlanLayout(area layout.LayoutArea) layout.LayoutPlan {
 			childY += childPlan.Consumed
 			remaining -= childPlan.Consumed
 		case layout.LayoutPartial:
+			if avoidBreak {
+				return layout.LayoutPlan{Status: layout.LayoutNothing}
+			}
 			for _, b := range childPlan.Blocks {
 				b.X += bm.ContentLeft()
 				b.Y += bm.ContentTop() + childY
@@ -162,7 +166,7 @@ func (e *DivElement) PlanLayout(area layout.LayoutArea) layout.LayoutPlan {
 			overflowChildren = append([]layout.Element{childPlan.Overflow}, e.Children[i+1:]...)
 			goto buildResult
 		case layout.LayoutNothing:
-			if childY == 0 {
+			if childY == 0 || avoidBreak {
 				return layout.LayoutPlan{Status: layout.LayoutNothing}
 			}
 			overflowChildren = e.Children[i:]
@@ -1254,6 +1258,7 @@ func (e *FlexContainerElement) PlanLayout(area layout.LayoutArea) layout.LayoutP
 		}
 	} else {
 		// Column layout
+		avoidBreak := e.Style != nil && e.Style.PageBreakInside == "avoid"
 		gap := 0.0
 		if e.Style != nil && e.Style.Gap > 0 {
 			gap = e.Style.Gap
@@ -1262,6 +1267,9 @@ func (e *FlexContainerElement) PlanLayout(area layout.LayoutArea) layout.LayoutP
 		for i, child := range children {
 			if i > 0 && gap > 0 {
 				if remainingHeight <= gap {
+					if avoidBreak {
+						return layout.LayoutPlan{Status: layout.LayoutNothing}
+					}
 					overflowChildren := append([]FlexChildElement(nil), children[i:]...)
 					if consumed > area.Height {
 						consumed = area.Height
@@ -1273,7 +1281,7 @@ func (e *FlexContainerElement) PlanLayout(area layout.LayoutArea) layout.LayoutP
 			}
 			plan := child.Element.PlanLayout(layout.LayoutArea{Width: innerWidth, Height: remainingHeight})
 			if plan.Status == layout.LayoutFull && plan.Consumed > remainingHeight {
-				if consumed == bm.ContentTop() {
+				if consumed == bm.ContentTop() || avoidBreak {
 					return layout.LayoutPlan{Status: layout.LayoutNothing}
 				}
 				overflowChildren := append([]FlexChildElement(nil), children[i:]...)
@@ -1292,6 +1300,9 @@ func (e *FlexContainerElement) PlanLayout(area layout.LayoutArea) layout.LayoutP
 				consumed += plan.Consumed
 				remainingHeight -= plan.Consumed
 			case layout.LayoutPartial:
+				if avoidBreak {
+					return layout.LayoutPlan{Status: layout.LayoutNothing}
+				}
 				for _, b := range plan.Blocks {
 					b.X += bm.ContentLeft()
 					b.Y += consumed
@@ -1305,7 +1316,7 @@ func (e *FlexContainerElement) PlanLayout(area layout.LayoutArea) layout.LayoutP
 				}
 				return e.buildFlexResult(area.Width, consumed, blocks, overflowChildren)
 			case layout.LayoutNothing:
-				if consumed == bm.ContentTop() {
+				if consumed == bm.ContentTop() || avoidBreak {
 					return layout.LayoutPlan{Status: layout.LayoutNothing}
 				}
 				overflowChildren := append([]FlexChildElement(nil), children[i:]...)

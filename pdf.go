@@ -610,12 +610,23 @@ func FromHTMLStreaming(htmlContent string, out io.Writer, opts ...html.Options) 
 		doc.SetEncryption(*opt.Encryption)
 	}
 
-	pages := layout.RenderPages(
-		result.Elements,
-		result.Config.Width, result.Config.Height,
-		result.Config.Margins[0], result.Config.Margins[1],
-		result.Config.Margins[2], result.Config.Margins[3],
-	)
+	hasHF := len(result.HeaderElements) > 0 || len(result.FooterElements) > 0
+	var pages []layout.PageResult
+	if hasHF {
+		pages = layout.RenderPagesWithHeaderFooter(
+			result.Elements, result.HeaderElements, result.FooterElements,
+			result.Config.Width, result.Config.Height,
+			result.Config.Margins[0], result.Config.Margins[1],
+			result.Config.Margins[2], result.Config.Margins[3],
+		)
+	} else {
+		pages = layout.RenderPages(
+			result.Elements,
+			result.Config.Width, result.Config.Height,
+			result.Config.Margins[0], result.Config.Margins[1],
+			result.Config.Margins[2], result.Config.Margins[3],
+		)
+	}
 
 	for _, pr := range pages {
 		p := document.NewPage(document.PageSize{Width: pr.Width, Height: pr.Height})

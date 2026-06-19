@@ -67,9 +67,11 @@ type PageConfig struct {
 
 // ConvertResult holds the conversion results.
 type ConvertResult struct {
-	Elements []layout.Element
-	Config   PageConfig
-	Metadata map[string]string
+	Elements       []layout.Element
+	HeaderElements []layout.Element
+	FooterElements []layout.Element
+	Config         PageConfig
+	Metadata       map[string]string
 }
 
 // Convert converts an HTML string to layout elements.
@@ -237,23 +239,38 @@ func Convert(htmlString string, opts Options) (*ConvertResult, error) {
 		}
 	}
 
-	// Convert body to elements
+	// Convert body to elements, separating header/footer as running elements
 	target := body
 	if target == nil {
 		target = dom
 	}
 
 	var elements []layout.Element
+	var headerEls, footerEls []layout.Element
 	for _, child := range target.Children {
+		if child.Tag == "header" {
+			if el := c.convertNode(child); el != nil {
+				headerEls = append(headerEls, el)
+			}
+			continue
+		}
+		if child.Tag == "footer" {
+			if el := c.convertNode(child); el != nil {
+				footerEls = append(footerEls, el)
+			}
+			continue
+		}
 		if el := c.convertNode(child); el != nil {
 			elements = append(elements, el)
 		}
 	}
 
 	return &ConvertResult{
-		Elements: elements,
-		Config:   pageConfig,
-		Metadata: metadata,
+		Elements:       elements,
+		HeaderElements: headerEls,
+		FooterElements: footerEls,
+		Config:         pageConfig,
+		Metadata:       metadata,
 	}, nil
 }
 

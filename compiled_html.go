@@ -124,11 +124,41 @@ func compileHTML(htmlContent string, compliant bool, compliance HTMLComplianceOp
 		return nil, fmt.Errorf("converting HTML: %w", err)
 	}
 
-	render := layout.RenderPages
-	if compliant {
-		render = layout.RenderTaggedPages
+	hasHF := len(result.HeaderElements) > 0 || len(result.FooterElements) > 0
+	var pages []layout.PageResult
+	if hasHF {
+		if compliant {
+			pages = layout.RenderTaggedPagesWithHeaderFooter(
+				result.Elements, result.HeaderElements, result.FooterElements,
+				result.Config.Width, result.Config.Height,
+				result.Config.Margins[0], result.Config.Margins[1],
+				result.Config.Margins[2], result.Config.Margins[3],
+			)
+		} else {
+			pages = layout.RenderPagesWithHeaderFooter(
+				result.Elements, result.HeaderElements, result.FooterElements,
+				result.Config.Width, result.Config.Height,
+				result.Config.Margins[0], result.Config.Margins[1],
+				result.Config.Margins[2], result.Config.Margins[3],
+			)
+		}
+	} else {
+		if compliant {
+			pages = layout.RenderTaggedPages(
+				result.Elements,
+				result.Config.Width, result.Config.Height,
+				result.Config.Margins[0], result.Config.Margins[1],
+				result.Config.Margins[2], result.Config.Margins[3],
+			)
+		} else {
+			pages = layout.RenderPages(
+				result.Elements,
+				result.Config.Width, result.Config.Height,
+				result.Config.Margins[0], result.Config.Margins[1],
+				result.Config.Margins[2], result.Config.Margins[3],
+			)
+		}
 	}
-	pages := render(result.Elements, result.Config.Width, result.Config.Height, result.Config.Margins[0], result.Config.Margins[1], result.Config.Margins[2], result.Config.Margins[3])
 
 	meta := document.Metadata{}
 	if title, ok := result.Metadata["title"]; ok {
