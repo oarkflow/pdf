@@ -174,6 +174,7 @@ Known limitations:
 
 - `examples/html_invoice` renders a styled invoice, protected invoice, Tailwind newsletter-style document, and a Devanagari letter.
 - `examples/template` demonstrates template-driven documents.
+- `examples/pdf_tools` demonstrates JSON template filling, existing PDF form filling, signature image placement, scanner image conversion, compression, redaction, translation, comparison, print preparation, archive validation, and PDF graph extraction.
 - `cmd/pdftohtml` provides a local PDF-to-HTML/text inspection UI.
 
 ## Development
