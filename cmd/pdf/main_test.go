@@ -78,6 +78,28 @@ func TestCmdSplitConfig(t *testing.T) {
 	assertCmdPDFPages(t, filepath.Join(dir, "rest.pdf"), 2)
 }
 
+func TestCmdFillTemplate(t *testing.T) {
+	dir := t.TempDir()
+	templatePath := filepath.Join(dir, "template.html")
+	dataPath := filepath.Join(dir, "data.json")
+	out := filepath.Join(dir, "filled.pdf")
+	if err := os.WriteFile(templatePath, []byte(`<html><body><p>Invoice {{ invoice.number }}</p></body></html>`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dataPath, []byte(`{"invoice":{"number":"INV-42"}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	runCmd(t, "pdf", "fill-template", "-data", dataPath, "-o", out, templatePath)
+	text, err := pdfapi.ToText(out)
+	if err != nil {
+		t.Fatalf("ToText failed: %v", err)
+	}
+	if !strings.Contains(text, "Invoice INV-42") {
+		t.Fatalf("filled PDF text = %q, want rendered invoice number", text)
+	}
+}
+
 func TestCmdPasswordAddAndRemove(t *testing.T) {
 	dir := t.TempDir()
 	input := filepath.Join(dir, "input.pdf")
@@ -150,6 +172,8 @@ func TestCmdValidateMissingExternalVeraPDF(t *testing.T) {
 func TestCmdHelpTopics(t *testing.T) {
 	runCmd(t, "pdf", "help")
 	runCmd(t, "pdf", "merge", "--help")
+	runCmd(t, "pdf", "fill-template", "--help")
+	runCmd(t, "pdf", "tools", "--help")
 	runCmd(t, "pdf", "password", "--help")
 	runCmd(t, "pdf", "password", "add", "--help")
 }

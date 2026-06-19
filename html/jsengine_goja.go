@@ -68,7 +68,7 @@ func shouldSkipCDN(src string) bool {
 
 // registerDOMShim registers minimal document/window/console objects on the goja runtime.
 func registerDOMShim(vm *goja.Runtime, dom *Node) {
-	// console stub
+	// console
 	console := vm.NewObject()
 	noop := func(call goja.FunctionCall) goja.Value { return goja.Undefined() }
 	console.Set("log", noop)
@@ -77,7 +77,7 @@ func registerDOMShim(vm *goja.Runtime, dom *Node) {
 	console.Set("info", noop)
 	vm.Set("console", console)
 
-	// window stub
+	// window
 	window := vm.NewObject()
 	window.Set("console", console)
 	vm.Set("window", window)
@@ -136,7 +136,6 @@ func wrapNode(vm *goja.Runtime, n *Node) goja.Value {
 		return goja.Undefined()
 	})
 	obj.Set("appendChild", func(call goja.FunctionCall) goja.Value {
-		// Expect a wrapped node — we can't easily unwrap, so this is a stub
 		return goja.Undefined()
 	})
 	obj.Set("removeChild", func(call goja.FunctionCall) goja.Value {

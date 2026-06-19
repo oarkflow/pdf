@@ -15,14 +15,18 @@ import (
 // PageOverlay is extra content appended to a copied page.
 type PageOverlay func(pageIndex int, page *document.Page) []byte
 
+// PageContentTransform rewrites copied page content before overlays are added.
+type PageContentTransform func(pageIndex int, content []byte) []byte
+
 // CopyOptions controls page copying operations.
 type CopyOptions struct {
-	Pages      []int
-	Password   string
-	Encryption *core.EncryptionConfig
-	Info       map[string]string
-	Rotate     map[int]int
-	Overlay    PageOverlay
+	Pages            []int
+	Password         string
+	Encryption       *core.EncryptionConfig
+	Info             map[string]string
+	Rotate           map[int]int
+	Overlay          PageOverlay
+	ContentTransform PageContentTransform
 }
 
 // Merge combines multiple PDF byte slices into a single PDF.
@@ -137,6 +141,9 @@ func CopyPages(pdfData []byte, opts CopyOptions) ([]byte, error) {
 		newPage.Rotation = normalizeRotation(page.Rotation)
 		if rotate, ok := opts.Rotate[pageNum]; ok {
 			newPage.Rotation = normalizeRotation(rotate)
+		}
+		if opts.ContentTransform != nil {
+			newPage.Contents = opts.ContentTransform(pageNum, newPage.Contents)
 		}
 		if opts.Overlay != nil {
 			newPage.Contents = append(newPage.Contents, opts.Overlay(pageNum, newPage)...)

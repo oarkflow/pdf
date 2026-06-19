@@ -746,6 +746,16 @@ func FromHTMLTemplateFile(templatePath string, data map[string]any, outputPath s
 	return FromHTML(rendered, outputPath, opts...)
 }
 
+// FromHTMLTemplateJSONFile renders an HTML template file with placeholder data
+// loaded from a JSON object and converts the result to a PDF file.
+func FromHTMLTemplateJSONFile(templatePath, jsonPath, outputPath string, opts ...html.Options) error {
+	data, err := LoadTemplateJSON(jsonPath)
+	if err != nil {
+		return err
+	}
+	return FromHTMLTemplateFile(templatePath, data, outputPath, opts...)
+}
+
 // FromHTMLTemplateStreaming renders an HTML template using fasttpl and writes
 // the PDF directly to the writer.
 func FromHTMLTemplateStreaming(htmlTpl string, data map[string]any, out io.Writer, opts ...html.Options) error {
@@ -761,4 +771,23 @@ func FromHTMLTemplateStreaming(htmlTpl string, data map[string]any, out io.Write
 		return fmt.Errorf("rendering template: %w", err)
 	}
 	return FromHTMLStreaming(rendered, out, opts...)
+}
+
+// LoadTemplateJSON reads a JSON object for use with HTML/PDF placeholders.
+func LoadTemplateJSON(jsonPath string) (map[string]any, error) {
+	if jsonPath == "" {
+		return nil, errors.New("pdf: JSON data path is empty")
+	}
+	data, err := os.ReadFile(jsonPath)
+	if err != nil {
+		return nil, fmt.Errorf("reading JSON data: %w", err)
+	}
+	var values map[string]any
+	if err := json.Unmarshal(data, &values); err != nil {
+		return nil, fmt.Errorf("parsing JSON data: %w", err)
+	}
+	if values == nil {
+		return nil, errors.New("pdf: JSON data must be an object")
+	}
+	return values, nil
 }

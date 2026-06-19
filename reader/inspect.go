@@ -4,9 +4,12 @@ package reader
 type AnnotationInfo struct {
 	Page    int        `json:"page"`
 	Subtype string     `json:"subtype,omitempty"`
+	Name    string     `json:"name,omitempty"`
+	Field   string     `json:"field,omitempty"`
 	Rect    [4]float64 `json:"rect,omitempty"`
 	URI     string     `json:"uri,omitempty"`
 	Content string     `json:"content,omitempty"`
+	Value   string     `json:"value,omitempty"`
 }
 
 // OutlineInfo describes a bookmark/outline item.
@@ -45,6 +48,9 @@ func (r *Reader) Annotations() []AnnotationInfo {
 			if subtype, ok := annotDict["/Subtype"].(string); ok {
 				info.Subtype = trimName(subtype)
 			}
+			info.Name = inheritedString(r.resolver, annotDict, "/T")
+			info.Field = trimName(inheritedString(r.resolver, annotDict, "/FT"))
+			info.Value = trimName(inheritedString(r.resolver, annotDict, "/V"))
 			if contents, ok := annotDict["/Contents"].(string); ok {
 				info.Content = contents
 			}
@@ -60,6 +66,18 @@ func (r *Reader) Annotations() []AnnotationInfo {
 		}
 	}
 	return out
+}
+
+// FormFields returns interactive widget fields in document order.
+func (r *Reader) FormFields() []AnnotationInfo {
+	var fields []AnnotationInfo
+	for _, annot := range r.Annotations() {
+		if annot.Subtype != "Widget" || annot.Name == "" {
+			continue
+		}
+		fields = append(fields, annot)
+	}
+	return fields
 }
 
 // Outlines returns the document bookmark tree.
@@ -171,4 +189,28 @@ func trimName(s string) string {
 		return s[1:]
 	}
 	return s
+}
+
+func inheritedString(resolver *Resolver, dict map[string]interface{}, key string) string {
+	for dict != nil {
+		if value, ok := dict[key]; ok {
+			if s, ok := value.(string); ok {
+				return s
+			}
+		}
+		parent, ok := dict["/Parent"]
+		if !ok {
+			return ""
+		}
+		obj, err := resolver.ResolveReference(parent)
+		if err != nil {
+			return ""
+		}
+		next, ok := obj.(map[string]interface{})
+		if !ok {
+			return ""
+		}
+		dict = next
+	}
+	return ""
 }

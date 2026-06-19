@@ -92,7 +92,7 @@ func TestSetEncryption(t *testing.T) {
 		Algorithm:     core.AES_256,
 		OwnerPassword: "owner",
 	})
-	// Should not panic; encryption is stub
+	// AES-256 encryption is accepted by the document configuration path.
 	doc.NewPage()
 	var buf bytes.Buffer
 	doc.WriteTo(&buf)

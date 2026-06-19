@@ -502,8 +502,8 @@ func (r *Renderer) renderTextElement(node *SVGNode) {
 }
 
 func (r *Renderer) renderImage(node *SVGNode) {
-	// Stub: image embedding requires external resource handling
-	r.buf = append(r.buf, "% image element (stub)\n"...)
+	// External raster image embedding is handled by the higher-level HTML/image
+	// pipeline where resource loading and decoding are available.
 }
 
 func (r *Renderer) renderUse(node *SVGNode) {

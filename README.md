@@ -48,6 +48,25 @@ func main() {
 }
 ```
 
+Fill placeholders from JSON and generate a PDF:
+
+```html
+<!-- invoice.html -->
+<h1>Invoice {{ invoice.number }}</h1>
+<p>Bill to: {{ customer.name }}</p>
+```
+
+```json
+{
+  "invoice": { "number": "INV-2026-0042" },
+  "customer": { "name": "Acme Ltd." }
+}
+```
+
+```go
+err := pdf.FromHTMLTemplateJSONFile("invoice.html", "invoice.json", "invoice.pdf")
+```
+
 Streaming output:
 
 ```go
@@ -93,6 +112,14 @@ pdf sign -key key.pem -cert cert.pem -reason Approved -o signed.pdf input.pdf
 pdf extract-images -o images input.pdf
 ```
 
+Template filling and tool discovery:
+
+```sh
+pdf fill-template -data invoice.json -o invoice.pdf invoice.html
+pdf tools
+pdf tools --json
+```
+
 ## HTML To PDF Support
 
 The renderer supports a practical subset of HTML/CSS:
@@ -129,11 +156,18 @@ For production invoice/report generation:
 - Treat HTML rendering as deterministic document rendering, not browser screenshotting.
 - Run `go test ./...` before releases.
 
+## Tool Coverage
+
+The CLI and `pdf.ToolCatalog()` expose available tool families:
+forms and AcroForms, JSON template filling, digital signatures, signature image
+placement, conversion, scanner workflows, compression, security, redaction, page
+organization, annotation/review, comparison, translation, validation, print
+preparation, archive/PDF-A, and related PDF graph tools.
+
 Known limitations:
 
 - AES-256 encrypted output and AES-256 encrypted input are not supported yet.
 - JavaScript support is intentionally minimal.
-- Some placeholder/stub areas remain in form filling, barcode layout, and SVG image element rendering.
 - PDF merge is intended for common page/resource merging and should be validated against your input corpus.
 
 ## Examples

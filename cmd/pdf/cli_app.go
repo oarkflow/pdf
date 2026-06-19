@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/oarkflow/pdf"
 	"github.com/oarkflow/pdf/converter"
 	"github.com/oarkflow/pdf/core"
+	"github.com/oarkflow/pdf/html"
 	"github.com/oarkflow/pdf/layout"
 	"github.com/oarkflow/pdf/sign"
 	"github.com/oarkflow/pdf/template"
@@ -31,8 +33,12 @@ func buildCLI() *cli.Command {
 		Commands: []*cli.Command{
 			createCommand(),
 			htmlCommand(),
+			fillTemplateCommand(),
 			imagesToPDFCommand(),
 			mergeCommand(),
+			toolsCommand(),
+			formFieldsCommand(),
+			fillFormCommand(),
 			infoCommand(),
 			validateCommand(),
 			searchCommand(),
@@ -49,9 +55,51 @@ func buildCLI() *cli.Command {
 			protectCommand(),
 			decryptCommand(),
 			signCommand(),
+			stampImageCommand(),
+			compressCommand(),
+			redactCommand(),
+			compareCommand(),
+			translateCommand(),
+			graphCommand(),
+			printPrepCommand(),
+			archiveCommand(),
 			watermarkCommand(),
 			pageNumbersCommand(),
 			setMetadataCommand(),
+		},
+	}
+}
+
+func fillTemplateCommand() *cli.Command {
+	return &cli.Command{
+		Name:        "fill-template",
+		Aliases:     []string{"template"},
+		Usage:       "Fill an HTML PDF template with JSON data",
+		ArgsUsage:   "<template.html>",
+		Category:    "Create and combine",
+		Description: "Render {{ placeholders }} in an HTML template using a JSON object, then generate a filled PDF.",
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "data", Aliases: []string{"json"}, Usage: "JSON data file", TakesFile: true, Required: true},
+			&cli.StringFlag{Name: "o", Aliases: []string{"output"}, Usage: "output PDF path", TakesFile: true, Required: true},
+			&cli.StringFlag{Name: "base-url", Usage: "base URL or directory for relative assets"},
+			&cli.BoolFlag{Name: "tailwind", Usage: "enable Tailwind utility parsing"},
+		},
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			if cmd.NArg() < 1 {
+				return usageError("pdf fill-template -data data.json -o filled.pdf template.html")
+			}
+			opts := html.Options{
+				BaseURL:     cmd.String("base-url"),
+				UseTailwind: cmd.Bool("tailwind"),
+			}
+			if opts.BaseURL == "" {
+				opts.BaseURL = filepath.Dir(cmd.Args().First())
+			}
+			if err := pdf.FromHTMLTemplateJSONFile(cmd.Args().First(), cmd.String("data"), cmd.String("o"), opts); err != nil {
+				return fmt.Errorf("filling template: %w", err)
+			}
+			fmt.Printf("Wrote filled PDF to %s\n", cmd.String("o"))
+			return nil
 		},
 	}
 }
@@ -110,7 +158,7 @@ func htmlCommand() *cli.Command {
 func imagesToPDFCommand() *cli.Command {
 	return &cli.Command{
 		Name:      "images-to-pdf",
-		Aliases:   []string{"image-pdf"},
+		Aliases:   []string{"image-pdf", "scan"},
 		Usage:     "Convert images into one PDF",
 		ArgsUsage: "[image1 image2 ...]",
 		Category:  "Create and combine",
@@ -202,6 +250,83 @@ func mergeCommand() *cli.Command {
 				return fmt.Errorf("merging files: %w", err)
 			}
 			fmt.Printf("Merged inputs into %s\n", output)
+			return nil
+		},
+	}
+}
+
+func toolsCommand() *cli.Command {
+	return &cli.Command{
+		Name:     "tools",
+		Usage:    "List PDF tool capabilities",
+		Category: "Inspect and extract",
+		Flags: []cli.Flag{
+			&cli.BoolFlag{Name: "json", Usage: "print JSON"},
+		},
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			catalog := pdf.ToolCatalog()
+			if cmd.Bool("json") {
+				writeJSON(os.Stdout, catalog)
+				return nil
+			}
+			for _, tool := range catalog {
+				fmt.Printf("%s [%s] %s: %s\n", tool.Category, tool.Status, tool.Name, tool.Description)
+			}
+			return nil
+		},
+	}
+}
+
+func formFieldsCommand() *cli.Command {
+	return &cli.Command{
+		Name:      "form-fields",
+		Usage:     "List PDF form fields",
+		ArgsUsage: "<file.pdf>",
+		Category:  "Forms",
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "password", Usage: "PDF password"},
+			&cli.BoolFlag{Name: "prompt-password", Usage: "prompt for the PDF password"},
+			&cli.BoolFlag{Name: "json", Usage: "print JSON"},
+		},
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			if cmd.NArg() < 1 {
+				return usageError("pdf form-fields <file.pdf>")
+			}
+			fields, err := pdf.ListFormFields(cmd.Args().First(), passwordValue(cmd.String("password"), cmd.Bool("prompt-password")))
+			if err != nil {
+				return fmt.Errorf("listing form fields: %w", err)
+			}
+			if cmd.Bool("json") {
+				writeJSON(os.Stdout, fields)
+				return nil
+			}
+			for _, field := range fields {
+				fmt.Printf("page %d: %s (%s) rect %.1f,%.1f,%.1f,%.1f\n",
+					field.Page, field.Name, field.Field, field.Rect[0], field.Rect[1], field.Rect[2], field.Rect[3])
+			}
+			return nil
+		},
+	}
+}
+
+func fillFormCommand() *cli.Command {
+	return &cli.Command{
+		Name:      "fill-form",
+		Usage:     "Fill existing PDF form fields from JSON",
+		ArgsUsage: "<file.pdf>",
+		Category:  "Forms",
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "data", Aliases: []string{"json"}, Usage: "JSON data file", TakesFile: true, Required: true},
+			&cli.StringFlag{Name: "o", Aliases: []string{"output"}, Usage: "output filled PDF path", TakesFile: true, Required: true},
+		},
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			if cmd.NArg() < 1 {
+				return usageError("pdf fill-form -data data.json -o filled.pdf form.pdf")
+			}
+			if err := pdf.FillFormJSONFile(cmd.Args().First(), cmd.String("data"), cmd.String("o")); err != nil {
+				return fmt.Errorf("filling form: %w", err)
+			}
+			fmt.Printf("Wrote filled form PDF to %s\n", cmd.String("o"))
 			return nil
 		},
 	}
@@ -879,6 +1004,269 @@ func signCommand() *cli.Command {
 	}
 }
 
+func stampImageCommand() *cli.Command {
+	return &cli.Command{
+		Name:      "stamp-image",
+		Aliases:   []string{"signature-image"},
+		Usage:     "Place an uploaded image or signature image on PDF pages",
+		ArgsUsage: "<file.pdf>",
+		Category:  "Security and signing",
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "image", Usage: "PNG/JPEG/TIFF/WebP image path", TakesFile: true, Required: true},
+			&cli.StringFlag{Name: "o", Aliases: []string{"output"}, Usage: "output PDF path", TakesFile: true, Required: true},
+			&cli.IntFlag{Name: "page", Usage: "1-based page number"},
+			&cli.StringFlag{Name: "pages", Usage: "1-based pages, e.g. 1-3,5"},
+			&cli.FloatFlag{Name: "x", Usage: "left position in points"},
+			&cli.FloatFlag{Name: "y", Usage: "bottom position in points"},
+			&cli.FloatFlag{Name: "width", Usage: "image width in points"},
+			&cli.FloatFlag{Name: "height", Usage: "image height in points"},
+			&cli.StringFlag{Name: "password", Usage: "PDF password"},
+			&cli.BoolFlag{Name: "prompt-password", Usage: "prompt for the PDF password"},
+		},
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			if cmd.NArg() < 1 {
+				return usageError("pdf stamp-image -image sig.png -o signed-visual.pdf <file.pdf>")
+			}
+			pages, err := pagesFromCommand(cmd)
+			if err != nil {
+				return err
+			}
+			err = pdf.StampImage(cmd.Args().First(), cmd.String("o"), pdf.ImageStampOptions{
+				ImagePath: cmd.String("image"),
+				Page:      cmd.Int("page"),
+				Pages:     pages,
+				X:         cmd.Float("x"),
+				Y:         cmd.Float("y"),
+				Width:     cmd.Float("width"),
+				Height:    cmd.Float("height"),
+				Password:  passwordValue(cmd.String("password"), cmd.Bool("prompt-password")),
+			})
+			if err != nil {
+				return fmt.Errorf("stamping image: %w", err)
+			}
+			fmt.Printf("Wrote stamped PDF to %s\n", cmd.String("o"))
+			return nil
+		},
+	}
+}
+
+func compressCommand() *cli.Command {
+	return &cli.Command{
+		Name:      "compress",
+		Usage:     "Rewrite and compress a PDF",
+		ArgsUsage: "<file.pdf>",
+		Category:  "Modify",
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "o", Aliases: []string{"output"}, Usage: "output PDF path", TakesFile: true, Required: true},
+			&cli.StringFlag{Name: "password", Usage: "PDF password"},
+			&cli.BoolFlag{Name: "prompt-password", Usage: "prompt for the PDF password"},
+		},
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			if cmd.NArg() < 1 {
+				return usageError("pdf compress -o output.pdf <file.pdf>")
+			}
+			if err := pdf.CompressPDF(cmd.Args().First(), cmd.String("o"), passwordValue(cmd.String("password"), cmd.Bool("prompt-password"))); err != nil {
+				return fmt.Errorf("compressing PDF: %w", err)
+			}
+			fmt.Printf("Wrote compressed PDF to %s\n", cmd.String("o"))
+			return nil
+		},
+	}
+}
+
+func redactCommand() *cli.Command {
+	return &cli.Command{
+		Name:      "redact",
+		Usage:     "Redact literal text and rectangular regions",
+		ArgsUsage: "<file.pdf>",
+		Category:  "Modify",
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "o", Aliases: []string{"output"}, Usage: "output redacted PDF path", TakesFile: true, Required: true},
+			&cli.StringSliceFlag{Name: "text", Usage: "literal text to remove; repeatable"},
+			&cli.StringSliceFlag{Name: "region", Usage: "region page,x,y,width,height; repeatable"},
+			&cli.StringFlag{Name: "password", Usage: "PDF password"},
+			&cli.BoolFlag{Name: "prompt-password", Usage: "prompt for the PDF password"},
+		},
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			if cmd.NArg() < 1 {
+				return usageError("pdf redact -text secret -region 1,72,72,120,24 -o output.pdf <file.pdf>")
+			}
+			regions, err := parseRedactionRegions(cmd.StringSlice("region"))
+			if err != nil {
+				return err
+			}
+			if err := pdf.Redact(cmd.Args().First(), cmd.String("o"), pdf.RedactOptions{
+				Texts:    cmd.StringSlice("text"),
+				Regions:  regions,
+				Password: passwordValue(cmd.String("password"), cmd.Bool("prompt-password")),
+			}); err != nil {
+				return fmt.Errorf("redacting PDF: %w", err)
+			}
+			fmt.Printf("Wrote redacted PDF to %s\n", cmd.String("o"))
+			return nil
+		},
+	}
+}
+
+func compareCommand() *cli.Command {
+	return &cli.Command{
+		Name:      "compare",
+		Usage:     "Compare two PDFs",
+		ArgsUsage: "<a.pdf> <b.pdf>",
+		Category:  "Inspect and extract",
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "password", Usage: "PDF password"},
+			&cli.BoolFlag{Name: "prompt-password", Usage: "prompt for the PDF password"},
+			&cli.BoolFlag{Name: "json", Usage: "print JSON"},
+		},
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			if cmd.NArg() < 2 {
+				return usageError("pdf compare a.pdf b.pdf")
+			}
+			result, err := pdf.ComparePDF(cmd.Args().Get(0), cmd.Args().Get(1), converter.ConvertOptions{Password: passwordValue(cmd.String("password"), cmd.Bool("prompt-password"))})
+			if err != nil {
+				return fmt.Errorf("comparing PDFs: %w", err)
+			}
+			if cmd.Bool("json") {
+				writeJSON(os.Stdout, result)
+				return nil
+			}
+			if len(result.Differences) == 0 {
+				fmt.Println("PDFs match by page count, extracted text, and metadata")
+				return nil
+			}
+			for _, diff := range result.Differences {
+				fmt.Printf("- %s\n", diff)
+			}
+			return nil
+		},
+	}
+}
+
+func translateCommand() *cli.Command {
+	return &cli.Command{
+		Name:      "translate",
+		Usage:     "Apply dictionary-based text replacements",
+		ArgsUsage: "<file.pdf>",
+		Category:  "Modify",
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "dict", Usage: "JSON string-to-string translation dictionary", TakesFile: true, Required: true},
+			&cli.StringFlag{Name: "o", Aliases: []string{"output"}, Usage: "output PDF path", TakesFile: true, Required: true},
+			&cli.StringFlag{Name: "password", Usage: "PDF password"},
+			&cli.BoolFlag{Name: "prompt-password", Usage: "prompt for the PDF password"},
+		},
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			if cmd.NArg() < 1 {
+				return usageError("pdf translate -dict translations.json -o output.pdf <file.pdf>")
+			}
+			if err := pdf.TranslateWithDictionary(cmd.Args().First(), cmd.String("dict"), cmd.String("o"), passwordValue(cmd.String("password"), cmd.Bool("prompt-password"))); err != nil {
+				return fmt.Errorf("translating PDF: %w", err)
+			}
+			fmt.Printf("Wrote translated PDF to %s\n", cmd.String("o"))
+			return nil
+		},
+	}
+}
+
+func graphCommand() *cli.Command {
+	return &cli.Command{
+		Name:      "graph",
+		Usage:     "Build a related-PDF graph",
+		ArgsUsage: "<file1.pdf> [file2.pdf ...]",
+		Category:  "Inspect and extract",
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "password", Usage: "PDF password"},
+			&cli.BoolFlag{Name: "prompt-password", Usage: "prompt for the PDF password"},
+			&cli.BoolFlag{Name: "json", Value: true, Usage: "print JSON"},
+		},
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			if cmd.NArg() < 1 {
+				return usageError("pdf graph file1.pdf [file2.pdf ...]")
+			}
+			graph, err := pdf.BuildPDFGraph(cmd.Args().Slice(), passwordValue(cmd.String("password"), cmd.Bool("prompt-password")))
+			if err != nil {
+				return fmt.Errorf("building graph: %w", err)
+			}
+			if cmd.Bool("json") {
+				writeJSON(os.Stdout, graph)
+				return nil
+			}
+			for _, node := range graph.Nodes {
+				fmt.Printf("node %s pages=%d\n", node.ID, node.Pages)
+			}
+			for _, edge := range graph.Edges {
+				fmt.Printf("edge %s -> %s [%s]\n", edge.From, edge.To, edge.Type)
+			}
+			return nil
+		},
+	}
+}
+
+func printPrepCommand() *cli.Command {
+	return &cli.Command{
+		Name:      "print-prep",
+		Usage:     "Normalize a PDF for print handoff",
+		ArgsUsage: "<file.pdf>",
+		Category:  "Modify",
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "o", Aliases: []string{"output"}, Usage: "output PDF path", TakesFile: true, Required: true},
+			&cli.BoolFlag{Name: "page-numbers", Usage: "add page numbers"},
+			&cli.StringFlag{Name: "title", Usage: "metadata title"},
+			&cli.StringFlag{Name: "author", Usage: "metadata author"},
+			&cli.StringFlag{Name: "password", Usage: "PDF password"},
+			&cli.BoolFlag{Name: "prompt-password", Usage: "prompt for the PDF password"},
+		},
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			if cmd.NArg() < 1 {
+				return usageError("pdf print-prep -o output.pdf <file.pdf>")
+			}
+			meta := make(map[string]string)
+			if title := cmd.String("title"); title != "" {
+				meta["Title"] = title
+			}
+			if author := cmd.String("author"); author != "" {
+				meta["Author"] = author
+			}
+			if err := pdf.PrepareForPrint(cmd.Args().First(), cmd.String("o"), meta, cmd.Bool("page-numbers"), passwordValue(cmd.String("password"), cmd.Bool("prompt-password"))); err != nil {
+				return fmt.Errorf("preparing PDF: %w", err)
+			}
+			fmt.Printf("Wrote print-ready PDF to %s\n", cmd.String("o"))
+			return nil
+		},
+	}
+}
+
+func archiveCommand() *cli.Command {
+	return &cli.Command{
+		Name:      "archive",
+		Usage:     "Create an archive copy and validate PDF/A profile",
+		ArgsUsage: "<file.pdf>",
+		Category:  "Modify",
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "o", Aliases: []string{"output"}, Usage: "output PDF path", TakesFile: true, Required: true},
+			&cli.StringFlag{Name: "password", Usage: "PDF password"},
+			&cli.BoolFlag{Name: "prompt-password", Usage: "prompt for the PDF password"},
+			&cli.BoolFlag{Name: "json", Usage: "print validation JSON"},
+		},
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			if cmd.NArg() < 1 {
+				return usageError("pdf archive -o archive.pdf <file.pdf>")
+			}
+			report, err := pdf.ArchivePDF(cmd.Args().First(), cmd.String("o"), passwordValue(cmd.String("password"), cmd.Bool("prompt-password")))
+			if err != nil {
+				return fmt.Errorf("archiving PDF: %w", err)
+			}
+			if cmd.Bool("json") {
+				writeJSON(os.Stdout, report)
+			} else {
+				fmt.Printf("Wrote archive PDF to %s\n", cmd.String("o"))
+				fmt.Printf("PDF/A valid: %t\n", report.Valid)
+			}
+			return nil
+		},
+	}
+}
+
 func watermarkCommand() *cli.Command {
 	return &cli.Command{
 		Name:      "watermark",
@@ -1026,6 +1414,35 @@ func pagesFromCommand(cmd *cli.Command) ([]int, error) {
 		return pages, nil
 	}
 	return nil, nil
+}
+
+func parseRedactionRegions(values []string) ([]pdf.RedactionRegion, error) {
+	regions := make([]pdf.RedactionRegion, 0, len(values))
+	for _, value := range values {
+		parts := strings.Split(value, ",")
+		if len(parts) != 5 {
+			return nil, fmt.Errorf("invalid region %q: expected page,x,y,width,height", value)
+		}
+		page, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+		if err != nil || page < 1 {
+			return nil, fmt.Errorf("invalid region page %q", parts[0])
+		}
+		nums := make([]float64, 4)
+		for i := 1; i < len(parts); i++ {
+			nums[i-1], err = strconv.ParseFloat(strings.TrimSpace(parts[i]), 64)
+			if err != nil {
+				return nil, fmt.Errorf("invalid region number %q: %w", parts[i], err)
+			}
+		}
+		regions = append(regions, pdf.RedactionRegion{
+			Page:   page,
+			X:      nums[0],
+			Y:      nums[1],
+			Width:  nums[2],
+			Height: nums[3],
+		})
+	}
+	return regions, nil
 }
 
 func printInfo(info *pdf.PDFInfo) {

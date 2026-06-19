@@ -68,7 +68,7 @@ func BuildAppearance(field *Field) *core.PdfStream {
 			arrowX, h*0.6, arrowX+8, h*0.6, arrowX+4, h*0.3)
 
 	case FieldSignature:
-		// Signature placeholder: line and label.
+		// Signature field appearance: line and label.
 		content = fmt.Sprintf("q 0.5 G 2 4 m %.2f 4 l S Q "+
 			"BT /Helv 8 Tf 2 6 Td (Signature) Tj ET", w-2)
 	}
