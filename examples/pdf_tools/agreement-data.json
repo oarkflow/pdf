@@ -1,0 +1,68 @@
+{
+  "agreement": {
+    "title": "Professional Services Agreement",
+    "number": "PSA-2026-0042",
+    "effective_date": "June 19, 2026",
+    "term": "12 months",
+    "value": "USD 48,000",
+    "acceptance_days": 10,
+    "signature_date": "June 19, 2026"
+  },
+  "provider": {
+    "name": "Oarkflow Labs Pvt. Ltd.",
+    "address": "Kathmandu, Nepal",
+    "stamp_file": "logo.png",
+    "stamp_image": "logo.png",
+    "stamp_placement": {
+      "page": 1,
+      "x": 82,
+      "y": 58,
+      "width": 124
+    },
+    "signatory": {
+      "name": "Sujit Shrestha",
+      "title": "Managing Director",
+      "signature_file": "qr-code.png",
+      "signature_image": "qr-code.png",
+      "signature_placement": {
+        "page": 1,
+        "x": 82,
+        "y": 144,
+        "width": 54
+      }
+    }
+  },
+  "client": {
+    "name": "Acme Ltd.",
+    "address": "Austin, Texas, USA",
+    "stamp_file": "logo.png",
+    "stamp_image": "logo.png",
+    "stamp_placement": {
+      "page": 1,
+      "x": 320,
+      "y": 58,
+      "width": 124
+    },
+    "signatory": {
+      "name": "Ada Lovelace",
+      "title": "Chief Operating Officer",
+      "signature_file": "qr-code.png",
+      "signature_image": "qr-code.png",
+      "signature_placement": {
+        "page": 1,
+        "x": 320,
+        "y": 144,
+        "width": 54
+      }
+    }
+  },
+  "services": [
+    "PDF generation, conversion, and document automation tooling.",
+    "Template design with JSON-driven placeholder filling.",
+    "Form, signature image, redaction, compression, and validation workflows."
+  ],
+  "payment": {
+    "schedule": "50% upon signing and 50% after delivery acceptance",
+    "net_days": 15
+  }
+}

@@ -25,8 +25,9 @@ func main() {
 		exitErr(err)
 	}
 
-	templateHTML := filepath.Join(outDir, "agreement.html")
-	templateJSON := filepath.Join(outDir, "agreement-data.json")
+	templateHTML := filepath.Join("examples", "pdf_tools", "agreement.html")
+	outTemplateHTML := filepath.Join(outDir, "agreement.html")
+	agreementDataJSON := filepath.Join("examples", "pdf_tools", "agreement-data.json")
 	filledTemplatePDF := filepath.Join(outDir, "agreement-filled.pdf")
 	formPDF := filepath.Join(outDir, "application-form.pdf")
 	formJSON := filepath.Join(outDir, "application-data.json")
@@ -44,425 +45,29 @@ func main() {
 	printPDF := filepath.Join(outDir, "print-ready.pdf")
 	archivePDF := filepath.Join(outDir, "archive-copy.pdf")
 	graphJSON := filepath.Join(outDir, "graph.json")
+	agreementJSON := filepath.Join(outDir, "agreement-data.json")
 
 	writeStampLogoPNG(logoPNG)
 	writeQRCodePNG(qrCodePNG, "PSA-2026-0042|Oarkflow Labs Pvt. Ltd.|Acme Ltd.|2026-06-19")
 	logoDataURI := pngDataURI(logoPNG)
 	qrCodeDataURI := pngDataURI(qrCodePNG)
-
-	mustWrite(templateHTML, []byte(`<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>{{ agreement.title }}</title>
-  <style>
-    @page {
-      size: A4;
-      margin: 8px 10px;
-    }
-
-    * {
-      box-sizing: border-box;
-    }
-
-    body {
-      margin: 0;
-      padding: 0;
-      background: #ffffff;
-      color: #1f2933;
-      font-family: Helvetica, Arial, sans-serif;
-      font-size: 10.5pt;
-      line-height: 1.58;
-      -webkit-print-color-adjust: exact;
-      print-color-adjust: exact;
-    }
-
-    .document {
-      max-width: 780px;
-      margin: 0 auto;
-    }
-
-    .top-rule {
-      height: 5px;
-      background: #102a43;
-      border-radius: 99px;
-      margin-bottom: 18px;
-    }
-
-    .header {
-      text-align: center;
-      margin-bottom: 22px;
-      padding-bottom: 16px;
-      border-bottom: 1px solid #d9e2ec;
-    }
-
-    h1 {
-      margin: 0;
-      color: #102a43;
-      font-size: 24pt;
-      font-weight: 700;
-      line-height: 1.18;
-      letter-spacing: .02em;
-      text-transform: uppercase;
-    }
-
-    .subtitle {
-      display: inline-block;
-      margin-top: 8px;
-      padding: 5px 12px;
-      border: 1px solid #d9e2ec;
-      border-radius: 99px;
-      color: #52606d;
-      background: #f8fafc;
-      font-size: 8.8pt;
-      font-weight: 600;
-      letter-spacing: .01em;
-    }
-
-    .meta {
-      width: 100%;
-      border-collapse: separate;
-      border-spacing: 0;
-      margin: 0 0 20px;
-      overflow: hidden;
-      border: 1px solid #bcccdc;
-      border-radius: 8px;
-    }
-
-    .meta td {
-      padding: 10px 12px;
-      vertical-align: top;
-      border-bottom: 1px solid #d9e2ec;
-    }
-
-    .meta tr:last-child td {
-      border-bottom: 0;
-    }
-
-    .meta .label {
-      width: 28%;
-      color: #243b53;
-      background: #f0f4f8;
-      font-size: 8.6pt;
-      font-weight: 700;
-      letter-spacing: .04em;
-      text-transform: uppercase;
-      border-right: 1px solid #d9e2ec;
-      white-space: nowrap;
-    }
-
-    .party-name {
-      color: #102a43;
-      font-size: 11pt;
-      font-weight: 700;
-    }
-
-    .muted {
-      color: #52606d;
-    }
-
-    .section {
-      margin: 0 0 14px;
-      padding: 12px 14px 13px;
-      border: 1px solid #e6edf3;
-      border-radius: 8px;
-      page-break-inside: avoid;
-    }
-
-    h2 {
-      margin: 0 0 8px;
-      padding-bottom: 6px;
-      border-bottom: 1px solid #d9e2ec;
-      color: #102a43;
-      font-size: 12.2pt;
-      font-weight: 700;
-      line-height: 1.25;
-    }
-
-    p {
-      margin: 0 0 7px;
-    }
-
-    p:last-child {
-      margin-bottom: 0;
-    }
-
-    ol {
-      margin: 7px 0 0 19px;
-      padding: 0;
-    }
-
-    li {
-      margin: 0 0 6px;
-      padding-left: 2px;
-    }
-
-    .signatures {
-      display: flex;
-      gap: 10px;
-      margin-top: 10px;
-    }
-
-    .signature-card {
-      flex: 1;
-      padding: 12px;
-      vertical-align: top;
-      border: 1px solid #bcccdc;
-      border-radius: 8px;
-      background: #f8fafc;
-      page-break-inside: avoid;
-    }
-
-    .signature-card strong {
-      display: block;
-      margin-bottom: 10px;
-      color: #102a43;
-      font-size: 10.5pt;
-    }
-
-    .signature-line {
-      min-height: 68px;
-      margin: 0 0 8px;
-      padding: 5px 0 7px;
-      border-bottom: 1.2px solid #243b53;
-    }
-
-    .signature-img {
-      display: block;
-      width: 58px;
-      height: 58px;
-      object-fit: contain;
-    }
-
-    .signature-detail {
-      margin-top: 7px;
-      font-size: 9.5pt;
-    }
-
-    .signature-detail .row {
-      margin-bottom: 2px;
-    }
-
-    .field-label {
-      color: #52606d;
-      font-size: 8.4pt;
-      font-weight: 700;
-      letter-spacing: .03em;
-      text-transform: uppercase;
-    }
-
-    .stamp-box {
-		width: 96px;
-		height: 96px;
-		margin-top: 15px;
-		padding: 5px;
-		border: 1px dashed #9fb3c8;
-		border-radius: 6px;
-		background: #ffffff;
-	}
-
-	.stamp-img {
-		display: block;
-		width: 86px;
-		height: 86px;
-		object-fit: contain;
-	}
-
-    .footer-note {
-      margin-top: 16px;
-      padding-top: 8px;
-      border-top: 1px solid #d9e2ec;
-      color: #52606d;
-      font-size: 8.4pt;
-      text-align: center;
-    }
-
-    @media print {
-      .document {
-        max-width: none;
-      }
-
-      .section,
-      .signature-card,
-      .meta {
-        break-inside: avoid;
-      }
-    }
-  </style>
-</head>
-<body>
-  <div class="document">
-    <div class="top-rule"></div>
-
-    <header class="header">
-      <h1>{{ agreement.title }}</h1>
-      <div class="subtitle">Agreement No. {{ agreement.number }} | Effective {{ agreement.effective_date }}</div>
-    </header>
-
-    <table class="meta">
-      <tr>
-        <td class="label">Provider</td>
-        <td>
-          <span class="party-name">{{ provider.name }}</span><br>
-          <span class="muted">{{ provider.address }}</span><br>
-          Authorized representative: {{ provider.signatory.name }}, {{ provider.signatory.title }}
-        </td>
-      </tr>
-      <tr>
-        <td class="label">Client</td>
-        <td>
-          <span class="party-name">{{ client.name }}</span><br>
-          <span class="muted">{{ client.address }}</span><br>
-          Authorized representative: {{ client.signatory.name }}, {{ client.signatory.title }}
-        </td>
-      </tr>
-      <tr>
-        <td class="label">Term and value</td>
-        <td>{{ agreement.term }} | {{ agreement.value }}</td>
-      </tr>
-    </table>
-
-    <section class="section">
-      <h2>1. Scope of Services</h2>
-      <p>{{ provider.name }} will provide the services described below to {{ client.name }}.</p>
-      <ol>
-        {{ range item in services }}
-        <li>{{ $item }}</li>
-        {{ end }}
-      </ol>
-    </section>
-
-    <section class="section">
-      <h2>2. Payment</h2>
-      <p>{{ client.name }} will pay {{ agreement.value }} according to the following schedule: {{ payment.schedule }}.</p>
-      <p>Invoices are payable within {{ payment.net_days }} days from receipt unless disputed in writing.</p>
-    </section>
-
-    <section class="section">
-      <h2>3. Confidentiality</h2>
-      <p>Each party will protect non-public business, financial, technical, and customer information received from the other party and will use it only to perform this agreement.</p>
-    </section>
-
-    <section class="section">
-      <h2>4. Deliverables and Acceptance</h2>
-      <p>Deliverables will be reviewed by {{ client.signatory.name }} or a designated reviewer. Written acceptance, production use, or no rejection within {{ agreement.acceptance_days }} days will constitute acceptance.</p>
-    </section>
-
-    <section class="section">
-      <h2>5. Signatures and Stamp Images</h2>
-      <p>The names, signature QR images, and company stamp images below are populated from JSON data. The same QR image is also used by the post-generation signature-image placement example.</p>
-
-      <div class="signatures">
-        <div class="signature-card">
-          <strong>For {{ provider.name }}</strong>
-          <div class="signature-line">
-            <img class="signature-img" src="{{ provider.signatory.signature_image }}" alt="Provider signature QR">
-          </div>
-          <div class="signature-detail">
-            <div class="row"><span class="field-label">Name:</span> {{ provider.signatory.name }}</div>
-            <div class="row"><span class="field-label">Title:</span> {{ provider.signatory.title }}</div>
-            <div class="row"><span class="field-label">Date:</span> {{ agreement.signature_date }}</div>
-          </div>
-          <div class="stamp-box">
-            <img class="stamp-img" src="{{ provider.stamp_image }}" alt="Provider stamp">
-          </div>
-        </div>
-
-        <div class="signature-card">
-          <strong>For {{ client.name }}</strong>
-          <div class="signature-line">
-            <img class="signature-img" src="{{ client.signatory.signature_image }}" alt="Client signature QR">
-          </div>
-          <div class="signature-detail">
-            <div class="row"><span class="field-label">Name:</span> {{ client.signatory.name }}</div>
-            <div class="row"><span class="field-label">Title:</span> {{ client.signatory.title }}</div>
-            <div class="row"><span class="field-label">Date:</span> {{ agreement.signature_date }}</div>
-          </div>
-          <div class="stamp-box">
-            <img class="stamp-img" src="{{ client.stamp_image }}" alt="Client stamp">
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <p class="footer-note">Generated by github.com/oarkflow/pdf using HTML placeholders and JSON data.</p>
-  </div>
-</body>
-</html>`))
-	agreementData := map[string]any{
-		"agreement": map[string]any{
-			"title":           "Professional Services Agreement",
-			"number":          "PSA-2026-0042",
-			"effective_date":  "June 19, 2026",
-			"term":            "12 months",
-			"value":           "USD 48,000",
-			"acceptance_days": 10,
-			"signature_date":  "June 19, 2026",
-		},
-		"provider": map[string]any{
-			"name":        "Oarkflow Labs Pvt. Ltd.",
-			"address":     "Kathmandu, Nepal",
-			"stamp_file":  "logo.png",
-			"stamp_image": logoDataURI,
-			"stamp_placement": map[string]any{
-				"page":  1,
-				"x":     82,
-				"y":     58,
-				"width": 124,
-			},
-			"signatory": map[string]any{
-				"name":            "Sujit Shrestha",
-				"title":           "Managing Director",
-				"signature_file":  "qr-code.png",
-				"signature_image": qrCodeDataURI,
-				"signature_placement": map[string]any{
-					"page":  1,
-					"x":     82,
-					"y":     144,
-					"width": 54,
-				},
-			},
-		},
-		"client": map[string]any{
-			"name":        "Acme Ltd.",
-			"address":     "Austin, Texas, USA",
-			"stamp_file":  "logo.png",
-			"stamp_image": logoDataURI,
-			"stamp_placement": map[string]any{
-				"page":  1,
-				"x":     320,
-				"y":     58,
-				"width": 124,
-			},
-			"signatory": map[string]any{
-				"name":            "Ada Lovelace",
-				"title":           "Chief Operating Officer",
-				"signature_file":  "qr-code.png",
-				"signature_image": qrCodeDataURI,
-				"signature_placement": map[string]any{
-					"page":  1,
-					"x":     320,
-					"y":     144,
-					"width": 54,
-				},
-			},
-		},
-		"services": []string{
-			"PDF generation, conversion, and document automation tooling.",
-			"Template design with JSON-driven placeholder filling.",
-			"Form, signature image, redaction, compression, and validation workflows.",
-		},
-		"payment": map[string]any{
-			"schedule": "50% upon signing and 50% after delivery acceptance",
-			"net_days": 15,
-		},
-	}
-	agreementJSON, err := json.MarshalIndent(agreementData, "", "  ")
+	templateBytes, err := os.ReadFile(templateHTML)
 	if err != nil {
 		exitErr(err)
 	}
-	mustWrite(templateJSON, agreementJSON)
-	if err := pdf.FromHTMLTemplateJSONFile(templateHTML, templateJSON, filledTemplatePDF); err != nil {
+	mustWrite(outTemplateHTML, templateBytes)
+
+	agreementData, err := pdf.LoadTemplateJSON(agreementDataJSON)
+	if err != nil {
+		exitErr(err)
+	}
+	injectAgreementImageData(agreementData, logoDataURI, qrCodeDataURI)
+	agreementJSONBytes, err := json.MarshalIndent(agreementData, "", "  ")
+	if err != nil {
+		exitErr(err)
+	}
+	mustWrite(agreementJSON, agreementJSONBytes)
+	if err := pdf.FromHTMLTemplateJSONFile(outTemplateHTML, agreementJSON, filledTemplatePDF); err != nil {
 		exitErr(err)
 	}
 
@@ -478,7 +83,6 @@ func main() {
 
 	writeTextPDF(sourcePDF, "Secret contract for Hello Corp")
 	writePNG(scanPNG, color.RGBA{R: 230, G: 230, B: 230, A: 255})
-
 
 	// REPLACE with a simple copy so stampedPDF still exists for downstream uses:
 	srcData, err := os.ReadFile(filledTemplatePDF)
@@ -536,6 +140,26 @@ func main() {
 	fmt.Printf("Compressed comparison differences: %d\n", len(comparison.Differences))
 	fmt.Printf("Archive validation valid: %t\n", archiveReport.Valid)
 	fmt.Printf("Graph nodes: %d\n", len(graph.Nodes))
+}
+
+func injectAgreementImageData(agreementData map[string]any, logoDataURI, qrCodeDataURI string) {
+	provider, _ := agreementData["provider"].(map[string]any)
+	client, _ := agreementData["client"].(map[string]any)
+	providerSignatory, _ := provider["signatory"].(map[string]any)
+	clientSignatory, _ := client["signatory"].(map[string]any)
+
+	if provider != nil {
+		provider["stamp_image"] = logoDataURI
+	}
+	if providerSignatory != nil {
+		providerSignatory["signature_image"] = qrCodeDataURI
+	}
+	if client != nil {
+		client["stamp_image"] = logoDataURI
+	}
+	if clientSignatory != nil {
+		clientSignatory["signature_image"] = qrCodeDataURI
+	}
 }
 
 func writeTextPDF(path, text string) {
