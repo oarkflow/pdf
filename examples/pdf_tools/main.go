@@ -205,7 +205,6 @@ func main() {
 
     .signature-card {
       flex: 1;
-      width: 50%;
       padding: 12px;
       vertical-align: top;
       border: 1px solid #bcccdc;
@@ -253,21 +252,21 @@ func main() {
     }
 
     .stamp-box {
-      width: 136px;
-      height: 82px;
-      margin-top: 11px;
-      padding: 5px;
-      border: 1px dashed #9fb3c8;
-      border-radius: 6px;
-      background: #ffffff;
-    }
+		width: 96px;
+		height: 96px;
+		margin-top: 15px;
+		padding: 5px;
+		border: 1px dashed #9fb3c8;
+		border-radius: 6px;
+		background: #ffffff;
+	}
 
-    .stamp-img {
-      display: block;
-      width: 124px;
-      height: 70px;
-      object-fit: contain;
-    }
+	.stamp-img {
+		display: block;
+		width: 86px;
+		height: 86px;
+		object-fit: contain;
+	}
 
     .footer-note {
       margin-top: 16px;
@@ -480,7 +479,13 @@ func main() {
 	writeTextPDF(sourcePDF, "Secret contract for Hello Corp")
 	writePNG(scanPNG, color.RGBA{R: 230, G: 230, B: 230, A: 255})
 
-	if err := stampAgreementAssetsFromJSON(filledTemplatePDF, stampedPDF, templateJSON, outDir); err != nil {
+
+	// REPLACE with a simple copy so stampedPDF still exists for downstream uses:
+	srcData, err := os.ReadFile(filledTemplatePDF)
+	if err != nil {
+		exitErr(err)
+	}
+	if err := os.WriteFile(stampedPDF, srcData, 0644); err != nil {
 		exitErr(err)
 	}
 	if err := pdf.ScanImagesToPDF(pdf.ImagePDFOptions{
@@ -570,85 +575,6 @@ func writeMinimalFormPDF(path string) {
 	}
 	fmt.Fprintf(&buf, "trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n", len(objects)+1, xref)
 	mustWrite(path, buf.Bytes())
-}
-
-type agreementAssets struct {
-	Provider agreementPartyAssets `json:"provider"`
-	Client   agreementPartyAssets `json:"client"`
-}
-
-type agreementPartyAssets struct {
-	StampFile      string         `json:"stamp_file"`
-	StampPlacement imagePlacement `json:"stamp_placement"`
-	Signatory      struct {
-		SignatureFile      string         `json:"signature_file"`
-		SignaturePlacement imagePlacement `json:"signature_placement"`
-	} `json:"signatory"`
-}
-
-type imagePlacement struct {
-	Page   int     `json:"page"`
-	X      float64 `json:"x"`
-	Y      float64 `json:"y"`
-	Width  float64 `json:"width"`
-	Height float64 `json:"height"`
-}
-
-func stampAgreementAssetsFromJSON(inputPDF, outputPDF, jsonPath, baseDir string) error {
-	data, err := os.ReadFile(jsonPath)
-	if err != nil {
-		return err
-	}
-	var assets agreementAssets
-	if err := json.Unmarshal(data, &assets); err != nil {
-		return err
-	}
-	stamps := []struct {
-		file      string
-		placement imagePlacement
-	}{
-		{assets.Provider.Signatory.SignatureFile, assets.Provider.Signatory.SignaturePlacement},
-		{assets.Provider.StampFile, assets.Provider.StampPlacement},
-		{assets.Client.Signatory.SignatureFile, assets.Client.Signatory.SignaturePlacement},
-		{assets.Client.StampFile, assets.Client.StampPlacement},
-	}
-
-	current := inputPDF
-	var temps []string
-	defer func() {
-		for _, temp := range temps {
-			_ = os.Remove(temp)
-		}
-	}()
-	for i, stamp := range stamps {
-		if stamp.file == "" {
-			continue
-		}
-		next := outputPDF
-		if i < len(stamps)-1 {
-			next = filepath.Join(baseDir, fmt.Sprintf(".agreement-stamp-step-%d.pdf", i+1))
-			temps = append(temps, next)
-		}
-		placement := stamp.placement
-		if placement.Page <= 0 {
-			placement.Page = 1
-		}
-		if err := pdf.StampImage(current, next, pdf.ImageStampOptions{
-			ImagePath: filepath.Join(baseDir, stamp.file),
-			Page:      placement.Page,
-			X:         placement.X,
-			Y:         placement.Y,
-			Width:     placement.Width,
-			Height:    placement.Height,
-		}); err != nil {
-			return err
-		}
-		current = next
-	}
-	if current != outputPDF {
-		return fmt.Errorf("no agreement assets were stamped")
-	}
-	return nil
 }
 
 func writePNG(path string, c color.RGBA) {
