@@ -100,6 +100,23 @@ func TestCmdFillTemplate(t *testing.T) {
 	}
 }
 
+func TestCmdMarkdownToPDF(t *testing.T) {
+	dir := t.TempDir()
+	input := filepath.Join(dir, "report.md")
+	output := filepath.Join(dir, "report.pdf")
+	if err := os.WriteFile(input, []byte("# Project report\n\nA polished **summary**."), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runCmd(t, "pdf", "markdown", "-theme", "modern", "-o", output, input)
+	text, err := pdfapi.ToText(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(text, "Project report") || !strings.Contains(text, "summary") {
+		t.Fatalf("unexpected Markdown PDF text: %q", text)
+	}
+}
+
 func TestCmdPasswordAddAndRemove(t *testing.T) {
 	dir := t.TempDir()
 	input := filepath.Join(dir, "input.pdf")

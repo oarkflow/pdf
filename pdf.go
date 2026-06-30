@@ -14,6 +14,7 @@ import (
 	"github.com/oarkflow/pdf/document"
 	"github.com/oarkflow/pdf/html"
 	"github.com/oarkflow/pdf/layout"
+	markdownrenderer "github.com/oarkflow/pdf/markdown"
 	"github.com/oarkflow/pdf/reader"
 	"github.com/oarkflow/pdf/template"
 )
@@ -76,6 +77,45 @@ func Quick(text string, outputPath string) error {
 // FromHTML converts HTML content to a PDF file.
 func FromHTML(htmlContent string, outputPath string, opts ...html.Options) error {
 	return FromLeanHTML(htmlContent, outputPath, opts...)
+}
+
+// MarkdownOptions controls Markdown rendering and the resulting PDF.
+type MarkdownOptions struct {
+	Title      string
+	Theme      string // "classic" (serif) or "modern" (sans serif)
+	Stylesheet string // additional CSS applied after the built-in print theme
+	HTML       html.Options
+}
+
+// MarkdownToHTML converts Markdown into a self-contained, print-oriented HTML
+// document. The result can also be inspected or customized before PDF output.
+func MarkdownToHTML(markdownContent string, opts ...MarkdownOptions) (string, error) {
+	if strings.TrimSpace(markdownContent) == "" {
+		return "", errors.New("pdf: Markdown content is empty")
+	}
+	var opt MarkdownOptions
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
+	return markdownrenderer.Render(markdownContent, markdownrenderer.Options{
+		Title: opt.Title, Theme: opt.Theme, Stylesheet: opt.Stylesheet,
+	}), nil
+}
+
+// FromMarkdown converts Markdown content to a styled PDF file.
+func FromMarkdown(markdownContent, outputPath string, opts ...MarkdownOptions) error {
+	if outputPath == "" {
+		return errors.New("pdf: output path is empty")
+	}
+	var opt MarkdownOptions
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
+	doc, err := MarkdownToHTML(markdownContent, opt)
+	if err != nil {
+		return err
+	}
+	return FromHTML(doc, outputPath, opt.HTML)
 }
 
 // FromLeanHTML converts HTML content to a lean PDF file.

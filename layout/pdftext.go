@@ -81,6 +81,7 @@ func PrepareTextOperand(ctx *DrawContext, name string, bold, italic bool, face p
 		storeFontEntry(ctx, name, bold, italic, face, entry)
 		return entry.PDFName, "<" + strings.ToUpper(hex.EncodeToString([]byte(encoded))) + ">"
 	}
+	text = pdffont.EncodeWinAnsi(text)
 	return entry.PDFName, "(" + escapePDFText(text) + ")"
 }
 

@@ -25,7 +25,7 @@ func ToolCatalog() []ToolCapability {
 		{Key: "acroform-fill", Name: "AcroForm filling", Category: "Form tools", Status: ToolAvailable, Description: "Fill existing interactive PDF form fields from JSON or key-value data into flattened output PDFs."},
 		{Key: "digital-signature", Name: "Digital signatures", Category: "Signature tools", Status: ToolAvailable, Description: "Apply certificate-backed PDF signatures with reason, location, and contact metadata."},
 		{Key: "signature-image", Name: "Signature image placement", Category: "Signature tools", Status: ToolAvailable, Description: "Place uploaded signature images on selected PDF pages."},
-		{Key: "conversion", Name: "Conversion", Category: "Conversion tools", Status: ToolAvailable, Description: "Convert HTML and images to PDF, and convert PDFs to text, HTML, Markdown, JSON, and extracted images."},
+		{Key: "conversion", Name: "Conversion", Category: "Conversion tools", Status: ToolAvailable, Description: "Convert Markdown, HTML, and images to PDF, and convert PDFs to text, HTML, Markdown, JSON, and extracted images."},
 		{Key: "scanner", Name: "Scanner workflow", Category: "Scanner tools", Status: ToolAvailable, Description: "Convert scanned image batches into paginated PDFs."},
 		{Key: "compression", Name: "Compression", Category: "Compression tools", Status: ToolAvailable, Description: "Rewrite PDFs through compressed page streams and normalized copied resources."},
 		{Key: "security", Name: "Security", Category: "Security tools", Status: ToolAvailable, Description: "Protect and decrypt PDFs with password-based encryption."},

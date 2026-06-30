@@ -450,10 +450,10 @@ func (e *ListElement) PlanLayout(area layout.LayoutArea) layout.LayoutPlan {
 				Draw: func(ctx *layout.DrawContext, x, topY float64) {
 					if showMarker && cMarker != "" {
 						fn := resolveFontName(cFS, false, false)
-						ensureFont(ctx, fn)
-						ctx.WriteString(fmt.Sprintf("BT\n/%s %.1f Tf\n%.3f %.3f %.3f rg\n%.2f %.2f Td\n(%s) Tj\nET\n",
-							fn, cFS, cColor[0], cColor[1], cColor[2],
-							x+cBm.ContentLeft(), topY-cFS, escPDF(cMarker)))
+						fontKey, operand := layout.PrepareTextOperand(ctx, fn, false, false, nil, cMarker)
+						ctx.WriteString(fmt.Sprintf("BT\n/%s %.1f Tf\n%.3f %.3f %.3f rg\n%.2f %.2f Td\n%s Tj\nET\n",
+							fontKey, cFS, cColor[0], cColor[1], cColor[2],
+							x+cBm.ContentLeft(), topY-cFS, operand))
 					}
 					drawTextRuns(ctx, cRuns, x+cBm.ContentLeft()+indent, topY, cFS, cLH)
 				},
@@ -464,10 +464,10 @@ func (e *ListElement) PlanLayout(area layout.LayoutArea) layout.LayoutPlan {
 				X: 0, Y: cY, Width: area.Width, Height: itemHeight, Tag: "LI",
 				Draw: func(ctx *layout.DrawContext, x, topY float64) {
 					fn := resolveFontName(cFS, false, false)
-					ensureFont(ctx, fn)
-					ctx.WriteString(fmt.Sprintf("BT\n/%s %.1f Tf\n%.3f %.3f %.3f rg\n%.2f %.2f Td\n(%s) Tj\nET\n",
-						fn, cFS, cColor[0], cColor[1], cColor[2],
-						x+cBm.ContentLeft(), topY-cFS, escPDF(cMarker)))
+					fontKey, operand := layout.PrepareTextOperand(ctx, fn, false, false, nil, cMarker)
+					ctx.WriteString(fmt.Sprintf("BT\n/%s %.1f Tf\n%.3f %.3f %.3f rg\n%.2f %.2f Td\n%s Tj\nET\n",
+						fontKey, cFS, cColor[0], cColor[1], cColor[2],
+						x+cBm.ContentLeft(), topY-cFS, operand))
 				},
 			}
 			blocks = append(blocks, block)
@@ -2326,13 +2326,12 @@ func drawStyledRun(ctx *layout.DrawContext, run layout.TextRun, defaultColor [3]
 		fs = 12
 	}
 	fontName := resolveFontName(fs, run.Bold, run.Italic)
-	text := toWinAnsi(run.Text)
+	text := run.Text
 	if run.FontFace != nil {
 		fontName = run.FontName
 		if strings.TrimSpace(fontName) == "" {
 			fontName = run.FontFace.PostScriptName()
 		}
-		text = run.Text
 	}
 	color := defaultColor
 	if run.Color != ([3]float64{}) {
@@ -2624,83 +2623,6 @@ func escPDF(s string) string {
 	s = strings.ReplaceAll(s, `(`, `\(`)
 	s = strings.ReplaceAll(s, `)`, `\)`)
 	return s
-}
-
-// toWinAnsi converts UTF-8 string to WinAnsiEncoding-safe string.
-// Characters not in WinAnsi are replaced with closest equivalents.
-func toWinAnsi(s string) string {
-	var b strings.Builder
-	b.Grow(len(s))
-	for _, r := range s {
-		if r < 128 {
-			b.WriteRune(r)
-			continue
-		}
-		if r >= 160 && r <= 255 {
-			b.WriteByte(byte(r))
-			continue
-		}
-		// Map common Unicode chars to WinAnsi byte values
-		switch r {
-		case 0x2022: // bullet •
-			b.WriteByte(0x95) // WinAnsi 149
-		case 0x2013: // en dash –
-			b.WriteByte(0x96) // WinAnsi 150
-		case 0x2014: // em dash —
-			b.WriteByte(0x97) // WinAnsi 151
-		case 0x2018: // left single quote '
-			b.WriteByte(0x91) // WinAnsi 145
-		case 0x2019: // right single quote '
-			b.WriteByte(0x92) // WinAnsi 146
-		case 0x201C: // left double quote "
-			b.WriteByte(0x93) // WinAnsi 147
-		case 0x201D: // right double quote "
-			b.WriteByte(0x94) // WinAnsi 148
-		case 0x2026: // ellipsis …
-			b.WriteByte(0x85) // WinAnsi 133
-		case 0x20AC: // euro €
-			b.WriteByte(0x80) // WinAnsi 128
-		case 0x2122: // trademark ™
-			b.WriteByte(0x99) // WinAnsi 153
-		case 0x0152: // OE ligature
-			b.WriteByte(0x8C)
-		case 0x0153: // oe ligature
-			b.WriteByte(0x9C)
-		case 0x0160: // S caron
-			b.WriteByte(0x8A)
-		case 0x0161: // s caron
-			b.WriteByte(0x9A)
-		case 0x0178: // Y diaeresis
-			b.WriteByte(0x9F)
-		case 0x017D: // Z caron
-			b.WriteByte(0x8E)
-		case 0x017E: // z caron
-			b.WriteByte(0x9E)
-		case 0x0192: // f hook
-			b.WriteByte(0x83)
-		case 0x02C6: // circumflex
-			b.WriteByte(0x88)
-		case 0x02DC: // tilde
-			b.WriteByte(0x98)
-		case 0x2020: // dagger
-			b.WriteByte(0x86)
-		case 0x2021: // double dagger
-			b.WriteByte(0x87)
-		case 0x2030: // per mille
-			b.WriteByte(0x89)
-		case 0x2039: // single left angle
-			b.WriteByte(0x8B)
-		case 0x203A: // single right angle
-			b.WriteByte(0x9B)
-		case 0x201A: // single low-9 quote
-			b.WriteByte(0x82)
-		case 0x201E: // double low-9 quote
-			b.WriteByte(0x84)
-		default:
-			b.WriteByte('?') // fallback
-		}
-	}
-	return b.String()
 }
 
 // roundedRect returns PDF path operators for a rounded rectangle.

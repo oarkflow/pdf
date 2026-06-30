@@ -29,11 +29,11 @@ type ListItem struct {
 // NewList creates a list with string items.
 func NewList(listType ListType, items ...string) *List {
 	l := &List{
-		Type:   listType,
-		Indent: 20,
+		Type:    listType,
+		Indent:  20,
 		Spacing: 2,
-		Bullet: "\u2022", // bullet character
-		Start:  1,
+		Bullet:  "\u2022", // bullet character
+		Start:   1,
 	}
 	for _, text := range items {
 		l.Items = append(l.Items, ListItem{Content: NewParagraph(text)})
@@ -44,11 +44,11 @@ func NewList(listType ListType, items ...string) *List {
 // NewElementList creates a list with Element items.
 func NewElementList(listType ListType, items ...Element) *List {
 	l := &List{
-		Type:   listType,
-		Indent: 20,
+		Type:    listType,
+		Indent:  20,
 		Spacing: 2,
-		Bullet: "\u2022",
-		Start:  1,
+		Bullet:  "\u2022",
+		Start:   1,
 	}
 	for _, el := range items {
 		l.Items = append(l.Items, ListItem{Content: el})
@@ -96,11 +96,11 @@ func (l *List) PlanLayout(area LayoutArea) LayoutPlan {
 				X: 0, Y: curY,
 				Width: l.Indent, Height: 14,
 				Draw: func(ctx *DrawContext, x, pdfY float64) {
-					fontKey := ensureFont(ctx, "Helvetica", false, false)
+					fontKey, operand := PrepareTextOperand(ctx, "Helvetica", false, false, nil, localMarker)
 					ctx.WriteString("BT\n")
 					ctx.WriteString(fmt.Sprintf("/%s 12 Tf\n", fontKey))
 					ctx.WriteString(fmt.Sprintf("%.2f %.2f Td\n", x, pdfY-10))
-					ctx.WriteString(fmt.Sprintf("(%s) Tj\n", pdfEscapeString(localMarker)))
+					ctx.WriteString(fmt.Sprintf("%s Tj\n", operand))
 					ctx.WriteString("ET\n")
 					_ = localY
 				},

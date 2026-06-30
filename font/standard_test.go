@@ -110,6 +110,21 @@ func TestStandardFont_GlyphIndex(t *testing.T) {
 	}
 }
 
+func TestEncodeWinAnsiBullet(t *testing.T) {
+	got := EncodeWinAnsi("• ready – done")
+	want := string([]byte{0x95}) + " ready " + string([]byte{0x96}) + " done"
+	if got != want {
+		t.Fatalf("EncodeWinAnsi() = %q, want %q", got, want)
+	}
+}
+
+func TestEncodeWinAnsiCopyright(t *testing.T) {
+	got := []byte(EncodeWinAnsi("©"))
+	if len(got) != 1 || got[0] != 0xA9 {
+		t.Fatalf("EncodeWinAnsi(copyright) = % X, want A9", got)
+	}
+}
+
 func TestStandardFont_Properties(t *testing.T) {
 	f, _ := NewStandardFont("Times-Italic")
 	if f.ItalicAngle() != -15.5 {

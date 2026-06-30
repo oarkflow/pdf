@@ -297,16 +297,6 @@ func TestConvertTailwindAspectRatioClassReservesHeight(t *testing.T) {
 	}
 }
 
-func TestToWinAnsiEmitsSingleByteCopyright(t *testing.T) {
-	got := []byte(toWinAnsi("©"))
-	if len(got) != 1 {
-		t.Fatalf("len = %d, want 1", len(got))
-	}
-	if got[0] != 0xA9 {
-		t.Fatalf("byte = 0x%X, want 0xA9", got[0])
-	}
-}
-
 func TestConvertTreatsStyledInlineBlockAsInlineBox(t *testing.T) {
 	htmlInput := `<!DOCTYPE html><html><body><div class="text-center"><button class="bg-blue-600 text-white px-6 py-2 rounded-lg">Subscribe Now</button></div></body></html>`
 	result, err := Convert(htmlInput, Options{UseTailwind: true, DefaultFontSize: 10})

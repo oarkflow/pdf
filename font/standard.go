@@ -1,6 +1,9 @@
 package font
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // StandardFont implements Face for the 14 standard PDF fonts.
 type StandardFont struct {
@@ -42,18 +45,18 @@ func NewStandardFont(name string) (*StandardFont, error) {
 	return &m, nil
 }
 
-func (f *StandardFont) PostScriptName() string  { return f.name }
-func (f *StandardFont) UnitsPerEm() int          { return 1000 }
-func (f *StandardFont) Ascent() int               { return f.ascent }
-func (f *StandardFont) Descent() int              { return f.descent }
-func (f *StandardFont) BBox() [4]int              { return f.bbox }
-func (f *StandardFont) CapHeight() int            { return f.capHeight }
-func (f *StandardFont) StemV() int                { return f.stemV }
-func (f *StandardFont) ItalicAngle() float64      { return f.italicAngle }
-func (f *StandardFont) Flags() uint32             { return f.flags }
-func (f *StandardFont) RawData() []byte           { return nil }
-func (f *StandardFont) NumGlyphs() int            { return 256 }
-func (f *StandardFont) Kern(_, _ uint16) int      { return 0 }
+func (f *StandardFont) PostScriptName() string { return f.name }
+func (f *StandardFont) UnitsPerEm() int        { return 1000 }
+func (f *StandardFont) Ascent() int            { return f.ascent }
+func (f *StandardFont) Descent() int           { return f.descent }
+func (f *StandardFont) BBox() [4]int           { return f.bbox }
+func (f *StandardFont) CapHeight() int         { return f.capHeight }
+func (f *StandardFont) StemV() int             { return f.stemV }
+func (f *StandardFont) ItalicAngle() float64   { return f.italicAngle }
+func (f *StandardFont) Flags() uint32          { return f.flags }
+func (f *StandardFont) RawData() []byte        { return nil }
+func (f *StandardFont) NumGlyphs() int         { return 256 }
+func (f *StandardFont) Kern(_, _ uint16) int   { return 0 }
 
 // GlyphIndex maps a rune to its WinAnsiEncoding byte index.
 func (f *StandardFont) GlyphIndex(r rune) uint16 {
@@ -107,4 +110,24 @@ var winAnsiEncoding = map[rune]byte{
 	0x0153: 156, // Latin small ligature oe
 	0x017E: 158, // Latin small letter z with caron
 	0x0178: 159, // Latin capital letter Y with diaeresis
+}
+
+// EncodeWinAnsi converts UTF-8 text to bytes suitable for PDF standard fonts,
+// whose text strings use WinAnsiEncoding rather than UTF-8. Unsupported runes
+// are replaced with '?' so UTF-8 bytes cannot leak into a PDF string.
+func EncodeWinAnsi(s string) string {
+	var out strings.Builder
+	out.Grow(len(s))
+	for _, r := range s {
+		if b, ok := winAnsiEncoding[r]; ok {
+			out.WriteByte(b)
+			continue
+		}
+		if r < 128 || (r >= 160 && r <= 255) {
+			out.WriteByte(byte(r))
+			continue
+		}
+		out.WriteByte('?')
+	}
+	return out.String()
 }

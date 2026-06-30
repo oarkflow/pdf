@@ -33,6 +33,7 @@ func buildCLI() *cli.Command {
 		Commands: []*cli.Command{
 			createCommand(),
 			htmlCommand(),
+			markdownCommand(),
 			fillTemplateCommand(),
 			imagesToPDFCommand(),
 			mergeCommand(),
@@ -150,6 +151,60 @@ func htmlCommand() *cli.Command {
 				return fmt.Errorf("converting HTML: %w", err)
 			}
 			fmt.Printf("Converted %s to %s\n", cmd.Args().Get(0), cmd.Args().Get(1))
+			return nil
+		},
+	}
+}
+
+func markdownCommand() *cli.Command {
+	return &cli.Command{
+		Name:      "markdown",
+		Aliases:   []string{"md", "markdown-to-pdf"},
+		Usage:     "Convert Markdown to a styled PDF",
+		ArgsUsage: "<input.md> <output.pdf>",
+		Category:  "Create and combine",
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "o", Aliases: []string{"output"}, Usage: "output PDF path", TakesFile: true},
+			&cli.StringFlag{Name: "theme", Value: "classic", Usage: "typography theme: classic or modern"},
+			&cli.StringFlag{Name: "title", Usage: "PDF document title (defaults to the first heading)"},
+			&cli.StringFlag{Name: "css", Usage: "additional print stylesheet", TakesFile: true},
+		},
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			if cmd.NArg() < 1 {
+				return usageError("pdf markdown [-o output.pdf] <input.md> [output.pdf]")
+			}
+			input := cmd.Args().Get(0)
+			output := cmd.String("o")
+			if output == "" {
+				output = cmd.Args().Get(1)
+			}
+			if output == "" {
+				return usageError("pdf markdown [-o output.pdf] <input.md> [output.pdf]")
+			}
+			theme := strings.ToLower(strings.TrimSpace(cmd.String("theme")))
+			if theme != "classic" && theme != "modern" {
+				return fmt.Errorf("unsupported Markdown theme %q (use classic or modern)", theme)
+			}
+			content, err := os.ReadFile(input)
+			if err != nil {
+				return fmt.Errorf("reading %s: %w", input, err)
+			}
+			var customCSS string
+			if cssPath := cmd.String("css"); cssPath != "" {
+				css, readErr := os.ReadFile(cssPath)
+				if readErr != nil {
+					return fmt.Errorf("reading stylesheet %s: %w", cssPath, readErr)
+				}
+				customCSS = string(css)
+			}
+			opts := pdf.MarkdownOptions{
+				Title: cmd.String("title"), Theme: theme, Stylesheet: customCSS,
+				HTML: html.Options{BaseURL: filepath.Dir(input)},
+			}
+			if err := pdf.FromMarkdown(string(content), output, opts); err != nil {
+				return fmt.Errorf("converting Markdown: %w", err)
+			}
+			fmt.Printf("Converted %s to %s\n", input, output)
 			return nil
 		},
 	}

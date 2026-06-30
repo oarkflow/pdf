@@ -97,6 +97,41 @@ func TestToTextAndToHTML(t *testing.T) {
 	}
 }
 
+func TestFromMarkdownRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "markdown.pdf")
+	err := FromMarkdown("# Quarterly report\n\nA **clear** summary.\n\n| Metric | Value |\n| --- | --- |\n| Revenue | 42 |", path)
+	if err != nil {
+		t.Fatalf("FromMarkdown() error = %v", err)
+	}
+	text, err := ToText(path)
+	if err != nil {
+		t.Fatalf("ToText() error = %v", err)
+	}
+	for _, want := range []string{"Quarterly report", "clear", "Revenue", "42"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("PDF text %q does not contain %q", text, want)
+		}
+	}
+}
+
+func TestFromMarkdownListMarkerUsesWinAnsi(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "list.pdf")
+	markdown := "Current CARE 2.0 status:\n\n- Core development is completed.\n- Acceptance testing is pending."
+	if err := FromMarkdown(markdown, path); err != nil {
+		t.Fatalf("FromMarkdown() error = %v", err)
+	}
+	text, err := ToText(path)
+	if err != nil {
+		t.Fatalf("ToText() error = %v", err)
+	}
+	if strings.Contains(text, "â€¢") {
+		t.Fatalf("list marker was UTF-8 mojibake: %q", text)
+	}
+	if !strings.Contains(text, "•") {
+		t.Fatalf("list marker missing from extracted text: %q", text)
+	}
+}
+
 func TestInfoSplitAndExtractImages(t *testing.T) {
 	path := writeSimpleReadablePDF(t)
 

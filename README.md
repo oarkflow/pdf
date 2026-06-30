@@ -48,6 +48,26 @@ func main() {
 }
 ```
 
+Generate a polished PDF from Markdown:
+
+```go
+source := `# Project brief
+
+Clear writing, **good typography**, and print-ready tables.
+
+| Item | Status |
+| --- | --- |
+| Design | Ready |`
+
+err := pdf.FromMarkdown(source, "brief.pdf", pdf.MarkdownOptions{
+	Theme: "classic", // or "modern"
+})
+```
+
+The Markdown renderer supports headings, emphasis, links, images, blockquotes,
+ordered and unordered lists, fenced code blocks, rules, and tables. It uses an
+A4 print layout with balanced margins and can be extended with custom CSS.
+
 Fill placeholders from JSON and generate a PDF:
 
 ```html
@@ -88,6 +108,8 @@ html, err := pdf.ToHTML("input.pdf", converter.ConvertOptions{
 CLI conversion:
 
 ```sh
+pdf markdown report.md report.pdf
+pdf markdown -theme modern -css print.css -o report.pdf report.md
 pdf text -o output.txt input.pdf
 pdf to-html -o output.html -mode positioned -pages 1-3 input.pdf
 pdf to-markdown -o output.md input.pdf
