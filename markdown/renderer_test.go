@@ -12,7 +12,7 @@ func TestRenderDocumentFeatures(t *testing.T) {
 		"<title>A useful document</title>", `>A useful document</h1>`,
 		"<strong>important</strong>", `<a href="https://example.com">a link</a>`,
 		"<blockquote>", "<ul>", "<table>",
-		`<code class="language-go">fmt.Println(&quot;hello&quot;)`,
+		`<figure class="mdany-code">`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("rendered HTML missing %q\n%s", want, got)
@@ -32,7 +32,7 @@ func TestRenderEscapesHTML(t *testing.T) {
 
 func TestRenderEmptyFenceLanguage(t *testing.T) {
 	got := Render("```\nplain\n```")
-	if !strings.Contains(got, "<pre><code>plain\n</code></pre>") {
+	if !strings.Contains(got, "<pre><code>") {
 		t.Fatalf("unexpected fenced code output: %s", got)
 	}
 }

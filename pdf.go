@@ -14,6 +14,7 @@ import (
 	"github.com/oarkflow/pdf/document"
 	"github.com/oarkflow/pdf/html"
 	"github.com/oarkflow/pdf/layout"
+	"github.com/oarkflow/pdf/md"
 	markdownrenderer "github.com/oarkflow/pdf/markdown"
 	"github.com/oarkflow/pdf/reader"
 	"github.com/oarkflow/pdf/template"
@@ -82,8 +83,13 @@ func FromHTML(htmlContent string, outputPath string, opts ...html.Options) error
 // MarkdownOptions controls Markdown rendering and the resulting PDF.
 type MarkdownOptions struct {
 	Title      string
-	Theme      string // "classic" (serif) or "modern" (sans serif)
-	Stylesheet string // additional CSS applied after the built-in print theme
+	Author     string
+	Theme      string  // "classic" (serif) or "modern" (sans serif)
+	Stylesheet string  // additional CSS appended to the built-in theme
+	Margin     float64 // PDF margin in points (default 54)
+	PageSize   string  // "a4" or "letter" (default "a4")
+	TOC        bool    // include table of contents when headings exist
+	SoftHR     bool    // treat thematic breaks as spacing
 	HTML       html.Options
 }
 
@@ -102,7 +108,8 @@ func MarkdownToHTML(markdownContent string, opts ...MarkdownOptions) (string, er
 	}), nil
 }
 
-// FromMarkdown converts Markdown content to a styled PDF file.
+// FromMarkdown converts Markdown content directly to a PDF file using the
+// built-in markdown-to-PDF engine.
 func FromMarkdown(markdownContent, outputPath string, opts ...MarkdownOptions) error {
 	if outputPath == "" {
 		return errors.New("pdf: output path is empty")
@@ -111,11 +118,26 @@ func FromMarkdown(markdownContent, outputPath string, opts ...MarkdownOptions) e
 	if len(opts) > 0 {
 		opt = opts[0]
 	}
-	doc, err := MarkdownToHTML(markdownContent, opt)
+	if opt.PageSize == "" {
+		opt.PageSize = "a4"
+	}
+	if opt.Margin == 0 {
+		opt.Margin = 54
+	}
+	pdfBytes, err := md.Convert([]byte(markdownContent), md.PDF, md.Options{
+		Title:    opt.Title,
+		Author:   opt.Author,
+		Theme:    opt.Theme,
+		CSS:      opt.Stylesheet,
+		Margin:   opt.Margin,
+		PageSize: opt.PageSize,
+		TOC:      opt.TOC,
+		SoftHR:   opt.SoftHR,
+	})
 	if err != nil {
 		return err
 	}
-	return FromHTML(doc, outputPath, opt.HTML)
+	return os.WriteFile(outputPath, pdfBytes, 0644)
 }
 
 // FromLeanHTML converts HTML content to a lean PDF file.
