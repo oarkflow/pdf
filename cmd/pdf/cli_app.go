@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -46,6 +47,7 @@ func buildCLI() *cli.Command {
 			textCommand(),
 			toHTMLCommand(),
 			toMarkdownCommand(),
+			toDocxCommand(),
 			toJSONCommand(),
 			extractImagesCommand(),
 			splitCommand(),
@@ -572,9 +574,82 @@ func textCommand() *cli.Command {
 }
 
 func toMarkdownCommand() *cli.Command {
-	return convertTextLikeCommand("to-markdown", nil, "Convert PDF to Markdown", "Markdown", func(path string, opts converter.ConvertOptions) (string, error) {
-		return pdf.ToMarkdown(path, opts)
-	})
+	return &cli.Command{
+		Name:      "to-markdown",
+		Usage:     "Convert PDF to Markdown",
+		ArgsUsage: "<file.pdf>",
+		Category:  "Inspect and extract",
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "o", Aliases: []string{"output"}, Usage: "write output to file", TakesFile: true},
+			&cli.IntFlag{Name: "page", Usage: "1-based page number"},
+			&cli.StringFlag{Name: "pages", Usage: "1-based page range, e.g. 1-3,5"},
+			&cli.StringFlag{Name: "password", Usage: "PDF password"},
+			&cli.BoolFlag{Name: "prompt-password", Usage: "prompt for the PDF password"},
+			&cli.BoolFlag{Name: "tables", Value: true, Usage: "detect tables and render them as Markdown tables"},
+			&cli.BoolFlag{Name: "strict", Usage: "stop on the first page conversion error"},
+		},
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			if cmd.NArg() < 1 {
+				return usageError("pdf to-markdown [options] <file.pdf>")
+			}
+			opts, err := convertOptionsFromCommand(cmd)
+			if err != nil {
+				return err
+			}
+			opts.DetectTables = cmd.Bool("tables")
+			value, err := pdf.ToMarkdown(cmd.Args().First(), opts)
+			if err != nil && opts.Password == "" && isPasswordError(err) {
+				opts.Password = promptPDFPassword()
+				value, err = pdf.ToMarkdown(cmd.Args().First(), opts)
+			}
+			return writeStringOutputErr("Markdown", value, cmd.String("o"), err)
+		},
+	}
+}
+
+func toDocxCommand() *cli.Command {
+	return &cli.Command{
+		Name:      "to-docx",
+		Usage:     "Convert PDF to DOCX",
+		ArgsUsage: "<file.pdf>",
+		Category:  "Inspect and extract",
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "o", Aliases: []string{"output"}, Usage: "write output to file", TakesFile: true},
+			&cli.IntFlag{Name: "page", Usage: "1-based page number"},
+			&cli.StringFlag{Name: "pages", Usage: "1-based page range, e.g. 1-3,5"},
+			&cli.StringFlag{Name: "password", Usage: "PDF password"},
+			&cli.BoolFlag{Name: "prompt-password", Usage: "prompt for the PDF password"},
+			&cli.BoolFlag{Name: "tables", Value: true, Usage: "detect tables and render them as DOCX tables"},
+			&cli.BoolFlag{Name: "strict", Usage: "stop on the first page conversion error"},
+		},
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			if cmd.NArg() < 1 {
+				return usageError("pdf to-docx [options] <file.pdf>")
+			}
+			opts, err := convertOptionsFromCommand(cmd)
+			if err != nil {
+				return err
+			}
+			opts.DetectTables = cmd.Bool("tables")
+			data, err := pdf.ToDocx(cmd.Args().First(), opts)
+			if err != nil && opts.Password == "" && isPasswordError(err) {
+				opts.Password = promptPDFPassword()
+				data, err = pdf.ToDocx(cmd.Args().First(), opts)
+			}
+			if err != nil {
+				return fmt.Errorf("converting PDF to DOCX: %w", err)
+			}
+			output := cmd.String("o")
+			if output == "" {
+				return errors.New("to-docx requires -o <file.docx> (DOCX is a binary format)")
+			}
+			if err := os.WriteFile(output, data, 0644); err != nil {
+				return fmt.Errorf("writing %s: %w", output, err)
+			}
+			fmt.Printf("Wrote DOCX to %s\n", output)
+			return nil
+		},
+	}
 }
 
 func convertTextLikeCommand(name string, aliases []string, usage, label string, fn func(string, converter.ConvertOptions) (string, error)) *cli.Command {

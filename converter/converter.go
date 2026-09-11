@@ -467,8 +467,12 @@ func writeLineText(out *strings.Builder, spans []StyledSpan) {
 }
 
 func needsPlainTextGap(prev, cur StyledSpan) bool {
+	// writeLineText trims each span's own leading/trailing whitespace before
+	// writing it out, so a boundary space that was already present in the source
+	// (e.g. a "• " bullet or "1. " list marker drawn as its own text-showing
+	// operator) would otherwise be silently dropped. Re-insert it here.
 	if strings.HasSuffix(prev.Text, " ") || strings.HasPrefix(cur.Text, " ") {
-		return false
+		return true
 	}
 	xGap := cur.X - (prev.X + prev.Width)
 	avgCharW := cur.FontSize * 0.35

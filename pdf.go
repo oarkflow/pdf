@@ -199,7 +199,10 @@ func FromCompliantHTMLWithOptions(htmlContent string, outputPath string, complia
 	})
 }
 
-// ToHTML converts a PDF file to an HTML document.
+// ToHTML converts a PDF file to an HTML document. When called with no
+// explicit options, image extraction and table detection are enabled by
+// default for higher-fidelity output; pass ConvertOptions explicitly to
+// override.
 func ToHTML(inputPath string, opts ...converter.ConvertOptions) (string, error) {
 	if inputPath == "" {
 		return "", errors.New("pdf: input path is empty")
@@ -207,6 +210,9 @@ func ToHTML(inputPath string, opts ...converter.ConvertOptions) (string, error) 
 	var opt converter.ConvertOptions
 	if len(opts) > 0 {
 		opt = opts[0]
+	} else {
+		opt.ExtractImages = true
+		opt.DetectTables = true
 	}
 	conv, err := converter.NewFromFile(inputPath, opt)
 	if err != nil {
@@ -235,7 +241,10 @@ func ToText(inputPath string, opts ...converter.ConvertOptions) (string, error) 
 	return conv.ConvertText()
 }
 
-// ToMarkdown converts a PDF file to Markdown.
+// ToMarkdown converts a PDF file to Markdown. When called with no explicit
+// options, table detection is enabled by default so tabular content survives
+// the conversion as Markdown tables instead of being flattened into
+// unstructured paragraph text; pass ConvertOptions explicitly to override.
 func ToMarkdown(inputPath string, opts ...converter.ConvertOptions) (string, error) {
 	if inputPath == "" {
 		return "", errors.New("pdf: input path is empty")
@@ -243,6 +252,8 @@ func ToMarkdown(inputPath string, opts ...converter.ConvertOptions) (string, err
 	var opt converter.ConvertOptions
 	if len(opts) > 0 {
 		opt = opts[0]
+	} else {
+		opt.DetectTables = true
 	}
 	conv, err := converter.NewFromFile(inputPath, opt)
 	if err != nil {
@@ -265,6 +276,50 @@ func ToJSON(inputPath string, opts ...converter.ConvertOptions) ([]byte, error) 
 		return nil, err
 	}
 	return conv.ConvertJSON()
+}
+
+// ToDocx converts a PDF file to a DOCX document (Office Open XML). The PDF is
+// first reflowed to Markdown, with table detection enabled by default so
+// tabular content survives as real DOCX tables, and then rendered through the
+// same Markdown-to-DOCX exporter used for FromMarkdown-style output.
+func ToDocx(inputPath string, opts ...converter.ConvertOptions) ([]byte, error) {
+	if inputPath == "" {
+		return nil, errors.New("pdf: input path is empty")
+	}
+	var opt converter.ConvertOptions
+	if len(opts) > 0 {
+		opt = opts[0]
+	} else {
+		opt.DetectTables = true
+	}
+	conv, err := converter.NewFromFile(inputPath, opt)
+	if err != nil {
+		return nil, err
+	}
+	markdownContent, err := conv.ConvertMarkdown()
+	if err != nil {
+		return nil, err
+	}
+	meta := conv.Metadata()
+	return md.Convert([]byte(markdownContent), md.DOCX, md.Options{
+		Title:  meta["Title"],
+		Author: meta["Author"],
+	})
+}
+
+// ToDocxFile converts a PDF file directly to a DOCX file on disk. See ToDocx.
+func ToDocxFile(inputPath, outputPath string, opts ...converter.ConvertOptions) error {
+	if outputPath == "" {
+		return errors.New("pdf: output path is empty")
+	}
+	data, err := ToDocx(inputPath, opts...)
+	if err != nil {
+		return err
+	}
+	return core.WriteAtomic(outputPath, 0644, func(w io.Writer) error {
+		_, err := w.Write(data)
+		return err
+	})
 }
 
 // PDFInfo describes a PDF document.

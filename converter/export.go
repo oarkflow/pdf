@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html"
+	"math"
 	"strings"
 )
 
@@ -200,30 +201,98 @@ func BuildMarkdown(pages []PageResult) string {
 		if i > 0 {
 			out.WriteString("\n\n---\n\n")
 		}
-		for _, line := range page.Lines {
-			text := strings.TrimSpace(lineText(line.Spans))
-			if text == "" {
-				continue
-			}
-			if line.IsHeading {
-				level := line.Level
-				if level < 1 || level > 6 {
-					level = 2
-				}
-				out.WriteString(strings.Repeat("#", level))
-				out.WriteByte(' ')
-				out.WriteString(markdownEscape(text))
-				out.WriteString("\n\n")
-				continue
-			}
-			out.WriteString(markdownEscape(text))
-			out.WriteByte('\n')
-		}
-		for _, table := range page.Tables {
-			writeMarkdownTable(&out, table)
-		}
+		writeMarkdownPage(&out, page)
 	}
 	return strings.TrimSpace(out.String()) + "\n"
+}
+
+// writeMarkdownPage writes one page's lines, rendering any detected table in
+// place of the source lines it was built from (once) instead of duplicating
+// that content as plain paragraph text.
+func writeMarkdownPage(out *strings.Builder, page PageResult) {
+	tableLines := tableLineIndex(page.Tables)
+	renderedTables := make(map[int]bool)
+
+	lines := page.Lines
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+		if len(line.Spans) == 0 {
+			continue
+		}
+		lineY := math.Round(line.Y*10) / 10
+		if ti, ok := tableLines[lineY]; ok {
+			if !renderedTables[ti] {
+				writeMarkdownTable(out, page.Tables[ti])
+				renderedTables[ti] = true
+			}
+			continue
+		}
+
+		text := strings.TrimSpace(lineText(line.Spans))
+		if text == "" {
+			continue
+		}
+		if line.IsHeading {
+			level := line.Level
+			if level < 1 || level > 6 {
+				level = 2
+			}
+			// A heading that wraps onto the next source line (same level,
+			// immediately adjacent) is one logical heading, not two — merge
+			// it instead of emitting a second heading block right after.
+			for i+1 < len(lines) {
+				next := lines[i+1]
+				if !next.IsHeading || next.Level != line.Level || len(next.Spans) == 0 {
+					break
+				}
+				nextText := strings.TrimSpace(lineText(next.Spans))
+				if nextText == "" {
+					break
+				}
+				fontSize := avgFontSize(next.Spans)
+				if fontSize == 0 {
+					fontSize = 12
+				}
+				if math.Abs(line.Y-next.Y) > fontSize*1.8 {
+					break
+				}
+				text += " " + nextText
+				i++
+				line = next
+			}
+			out.WriteString(strings.Repeat("#", level))
+			out.WriteByte(' ')
+			out.WriteString(markdownEscape(text))
+			out.WriteString("\n\n")
+			continue
+		}
+		out.WriteString(markdownListMarker(text))
+		out.WriteByte('\n')
+	}
+
+	// Defensive fallback: render any table whose lines were never matched above.
+	for ti, table := range page.Tables {
+		if !renderedTables[ti] {
+			writeMarkdownTable(out, table)
+		}
+	}
+}
+
+// bulletGlyphs are common PDF bullet characters that aren't valid CommonMark
+// list markers on their own; they're rewritten to "- " so the item is
+// recognized as a real Markdown (and downstream DOCX/HTML) list item.
+var bulletGlyphs = []string{"•", "◦", "▪", "‣", "●", "○"}
+
+// markdownListMarker rewrites a line that visually starts with a bullet glyph
+// into CommonMark bullet-list syntax, then escapes it. Numbered items (e.g.
+// "1. Text") are already valid CommonMark and only need escaping.
+func markdownListMarker(text string) string {
+	for _, g := range bulletGlyphs {
+		if rest, ok := strings.CutPrefix(text, g); ok {
+			return "- " + markdownEscape(strings.TrimSpace(rest))
+		}
+	}
+	return markdownEscape(text)
 }
 
 func lineText(spans []StyledSpan) string {

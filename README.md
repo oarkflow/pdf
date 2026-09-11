@@ -103,6 +103,8 @@ html, err := pdf.ToHTML("input.pdf", converter.ConvertOptions{
 	ExtractImages: true,
 	DetectTables:  true,
 })
+markdown, err := pdf.ToMarkdown("input.pdf") // table detection is on by default
+err = pdf.ToDocxFile("input.pdf", "output.docx")
 ```
 
 CLI conversion:
@@ -113,6 +115,7 @@ pdf markdown -theme modern -css print.css -o report.pdf report.md
 pdf text -o output.txt input.pdf
 pdf to-html -o output.html -mode positioned -pages 1-3 input.pdf
 pdf to-markdown -o output.md input.pdf
+pdf to-docx -o output.docx input.pdf
 pdf to-json -o output.json input.pdf
 pdf text -prompt-password -o protected.txt protected.pdf
 ```

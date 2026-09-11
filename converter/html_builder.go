@@ -132,34 +132,27 @@ func (b *htmlBuilder) buildReflowedPage(sb *strings.Builder, page PageResult) {
 	// Build a link lookup by position.
 	linkMap := buildLinkMap(page.Links, page.Lines)
 
-	// Track which lines are part of tables.
-	tableLineSet := make(map[float64]bool)
-	for _, table := range page.Tables {
-		for _, row := range table.Cells {
-			for _, cell := range row {
-				for _, span := range cell.Spans {
-					tableLineSet[math.Round(span.Y*10)/10] = true
-				}
-			}
-		}
-	}
+	// Track which lines are part of tables, and which table each belongs to.
+	tableLines := tableLineIndex(page.Tables)
+	renderedTables := make(map[int]bool)
 
-	tableIdx := 0
 	prevY := -1.0
 	prevFontSize := 12.0
 
-	for _, line := range page.Lines {
+	lines := page.Lines
+	for idx := 0; idx < len(lines); idx++ {
+		line := lines[idx]
 		if len(line.Spans) == 0 {
 			continue
 		}
 
 		lineY := math.Round(line.Y*10) / 10
 
-		// If this line belongs to a table, render the table instead.
-		if tableLineSet[lineY] {
-			if tableIdx < len(page.Tables) {
-				b.renderTable(sb, page.Tables[tableIdx], linkMap)
-				tableIdx++
+		// If this line belongs to a table, render the table (once) instead.
+		if ti, ok := tableLines[lineY]; ok {
+			if !renderedTables[ti] {
+				b.renderTable(sb, page.Tables[ti], linkMap)
+				renderedTables[ti] = true
 			}
 			prevY = line.Y
 			prevFontSize = avgFontSize(line.Spans)
@@ -224,6 +217,30 @@ func (b *htmlBuilder) buildReflowedPage(sb *strings.Builder, page PageResult) {
 
 		b.renderSpans(sb, line.Spans, linkMap)
 
+		// A heading that wraps onto the next source line (same level,
+		// immediately adjacent) is one logical heading — merge it into the
+		// same element instead of emitting a second heading right after.
+		if line.IsHeading {
+			for idx+1 < len(lines) {
+				next := lines[idx+1]
+				if !next.IsHeading || next.Level != line.Level || len(next.Spans) == 0 {
+					break
+				}
+				nextFontSize := avgFontSize(next.Spans)
+				if nextFontSize == 0 {
+					nextFontSize = 12
+				}
+				if math.Abs(line.Y-next.Y) > nextFontSize*1.8 {
+					break
+				}
+				sb.WriteString(" ")
+				b.renderSpans(sb, next.Spans, linkMap)
+				line = next
+				fontSize = nextFontSize
+				idx++
+			}
+		}
+
 		if tag == "div" {
 			sb.WriteString("</div>\n")
 		} else {
@@ -234,10 +251,11 @@ func (b *htmlBuilder) buildReflowedPage(sb *strings.Builder, page PageResult) {
 		prevFontSize = fontSize
 	}
 
-	// Render remaining tables.
-	for tableIdx < len(page.Tables) {
-		b.renderTable(sb, page.Tables[tableIdx], linkMap)
-		tableIdx++
+	// Render any tables whose lines were never matched above (defensive fallback).
+	for ti, table := range page.Tables {
+		if !renderedTables[ti] {
+			b.renderTable(sb, table, linkMap)
+		}
 	}
 
 	// Render images.
