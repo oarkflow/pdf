@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/oarkflow/pdf/converter"
+	"github.com/oarkflow/pdf/core"
 	"github.com/oarkflow/pdf/document"
 	pdfimage "github.com/oarkflow/pdf/image"
 	"github.com/oarkflow/pdf/layout"
@@ -556,7 +557,7 @@ func writeOutputFile(path string, data []byte) error {
 	if err := ensureOutputDir(path); err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0644)
+	return core.WriteFileAtomic(path, data, 0644)
 }
 
 func ensureOutputDir(path string) error {

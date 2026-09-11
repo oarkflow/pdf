@@ -1,11 +1,14 @@
 package converter
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"math"
 	"sort"
 	"strings"
 
+	"github.com/oarkflow/pdf/core"
 	"github.com/oarkflow/pdf/reader"
 )
 
@@ -18,6 +21,9 @@ type Converter struct {
 
 // New creates a Converter from PDF data.
 func New(data []byte, opts ConvertOptions) (*Converter, error) {
+	if err := normalizeConvertOptions(&opts); err != nil {
+		return nil, err
+	}
 	var r *reader.Reader
 	var err error
 	if opts.Password != "" {
@@ -28,14 +34,26 @@ func New(data []byte, opts ConvertOptions) (*Converter, error) {
 	if err != nil {
 		return nil, fmt.Errorf("converter: %w", err)
 	}
-	if opts.Mode == "" {
-		opts.Mode = "reflowed"
-	}
 	return &Converter{reader: r, options: opts}, nil
+}
+
+// NewFromReader creates a converter from a bounded stream.
+func NewFromReader(input io.Reader, opts ConvertOptions) (*Converter, error) {
+	if input == nil {
+		return nil, fmt.Errorf("converter: reader is nil")
+	}
+	data, err := core.LimitedReadAll(input, 0)
+	if err != nil {
+		return nil, fmt.Errorf("converter: reading PDF: %w", err)
+	}
+	return New(data, opts)
 }
 
 // NewFromFile creates a Converter from a PDF file.
 func NewFromFile(path string, opts ConvertOptions) (*Converter, error) {
+	if err := normalizeConvertOptions(&opts); err != nil {
+		return nil, err
+	}
 	var r *reader.Reader
 	var err error
 	if opts.Password != "" {
@@ -46,10 +64,20 @@ func NewFromFile(path string, opts ConvertOptions) (*Converter, error) {
 	if err != nil {
 		return nil, fmt.Errorf("converter: %w", err)
 	}
+	return &Converter{reader: r, options: opts}, nil
+}
+
+func normalizeConvertOptions(opts *ConvertOptions) error {
 	if opts.Mode == "" {
 		opts.Mode = "reflowed"
 	}
-	return &Converter{reader: r, options: opts}, nil
+	if opts.Mode != "reflowed" && opts.Mode != "positioned" {
+		return fmt.Errorf("converter: unsupported mode %q (use reflowed or positioned)", opts.Mode)
+	}
+	if opts.Context == nil {
+		opts.Context = context.Background()
+	}
+	return nil
 }
 
 // SetProgressCallback sets a function to be called during conversion.
@@ -80,13 +108,19 @@ func (c *Converter) Convert() (*ConvertResult, error) {
 	}
 
 	for _, pageNum := range pages {
+		if err := c.options.Context.Err(); err != nil {
+			return nil, fmt.Errorf("converter: %w", err)
+		}
 		if c.onProgress != nil {
-			c.onProgress(pageNum, totalPages)
+			c.onProgress(pageNum+1, totalPages)
 		}
 
 		pageResult, err := c.ConvertPage(pageNum)
 		if err != nil {
-			// Non-fatal: skip pages that fail (e.g. FlateDecode errors) and continue.
+			if c.options.Strict {
+				return nil, fmt.Errorf("converting page %d: %w", pageNum+1, err)
+			}
+			result.Warnings = append(result.Warnings, ConversionWarning{Page: pageNum + 1, Message: err.Error()})
 			result.Pages = append(result.Pages, PageResult{
 				PageNum: pageNum,
 				Width:   612, // default US Letter
@@ -113,11 +147,17 @@ func (c *Converter) ConvertText() (string, error) {
 	}
 	results := make([]PageResult, 0, len(pages))
 	for _, pageNum := range pages {
+		if err := c.options.Context.Err(); err != nil {
+			return "", fmt.Errorf("converter: %w", err)
+		}
 		if c.onProgress != nil {
-			c.onProgress(pageNum, len(pages))
+			c.onProgress(pageNum+1, len(pages))
 		}
 		pageResult, err := c.ConvertPage(pageNum)
 		if err != nil {
+			if c.options.Strict {
+				return "", fmt.Errorf("converting page %d: %w", pageNum+1, err)
+			}
 			results = append(results, PageResult{PageNum: pageNum})
 			continue
 		}

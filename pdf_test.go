@@ -167,6 +167,64 @@ func TestInfoSplitAndExtractImages(t *testing.T) {
 	}
 }
 
+func TestAddPageNumbersSelectedPages(t *testing.T) {
+	path := writeTwoPageReadablePDF(t)
+	out := filepath.Join(t.TempDir(), "selected-pages.pdf")
+
+	if err := AddPageNumbers(path, out, PageNumberOptions{Pages: []int{2}}); err != nil {
+		t.Fatalf("AddPageNumbers(selected pages) error = %v", err)
+	}
+	text, err := ToText(out)
+	if err != nil {
+		t.Fatalf("ToText(selected pages) error = %v", err)
+	}
+	if strings.Contains(text, "Page 1 of 2") {
+		t.Fatalf("selected numbering unexpectedly stamped page 1: %q", text)
+	}
+	if !strings.Contains(text, "Page 2 of 2") {
+		t.Fatalf("selected numbering missing page 2: %q", text)
+	}
+}
+
+func TestAddPageNumbersZeroBasedSelection(t *testing.T) {
+	path := writeTwoPageReadablePDF(t)
+	out := filepath.Join(t.TempDir(), "zero-based-pages.pdf")
+
+	if err := AddPageNumbers(path, out, PageNumberOptions{Pages: []int{0, 1}}); err != nil {
+		t.Fatalf("AddPageNumbers(zero-based pages) error = %v", err)
+	}
+	text, err := ToText(out)
+	if err != nil {
+		t.Fatalf("ToText(zero-based pages) error = %v", err)
+	}
+	if strings.Count(text, "Page 1 of 2") != 1 {
+		t.Fatalf("zero-based page selection should stamp page 1 once, got %q", text)
+	}
+	if strings.Count(text, "Page 2 of 2") != 1 {
+		t.Fatalf("zero-based page selection should stamp page 2 once, got %q", text)
+	}
+}
+
+func TestAddPageNumbersCustomPositionAndColor(t *testing.T) {
+	path := writeTwoPageReadablePDF(t)
+	out := filepath.Join(t.TempDir(), "custom-numbering.pdf")
+
+	if err := AddPageNumbers(path, out, PageNumberOptions{
+		X: 72,
+		Y: 36,
+		Color: [3]float64{0.78, 0.12, 0.22},
+	}); err != nil {
+		t.Fatalf("AddPageNumbers(custom position/color) error = %v", err)
+	}
+	text, err := ToText(out)
+	if err != nil {
+		t.Fatalf("ToText(custom numbering) error = %v", err)
+	}
+	if !strings.Contains(text, "Page 1 of 2") {
+		t.Fatalf("custom numbering missing page text: %q", text)
+	}
+}
+
 func TestPageOperationsAndProtection(t *testing.T) {
 	path := writeTwoPageReadablePDF(t)
 	dir := t.TempDir()

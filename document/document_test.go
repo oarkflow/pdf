@@ -49,6 +49,15 @@ func TestAddPage(t *testing.T) {
 	}
 }
 
+func TestAddPageDoesNotDuplicateExistingPage(t *testing.T) {
+	doc, _ := NewDocument(A4)
+	p := doc.NewPage()
+	doc.AddPage(p)
+	if len(doc.Pages()) != 1 {
+		t.Fatalf("pages = %d, want 1 after adding same page twice", len(doc.Pages()))
+	}
+}
+
 func TestNewPage(t *testing.T) {
 	doc, _ := NewDocument(Letter)
 	p := doc.NewPage()

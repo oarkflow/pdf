@@ -1,0 +1,20 @@
+{
+  "nodes": [
+    {
+      "id": "source.pdf",
+      "path": "examples/advanced_tools/out/source.pdf",
+      "pages": 1
+    },
+    {
+      "id": "redacted.pdf",
+      "path": "examples/advanced_tools/out/redacted.pdf",
+      "pages": 1
+    },
+    {
+      "id": "translated.pdf",
+      "path": "examples/advanced_tools/out/translated.pdf",
+      "pages": 1
+    }
+  ],
+  "edges": null
+}

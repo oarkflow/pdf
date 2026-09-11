@@ -1,5 +1,7 @@
 package converter
 
+import "context"
+
 // StyledSpan is a text fragment with full styling information extracted from a PDF.
 type StyledSpan struct {
 	Text     string
@@ -79,6 +81,17 @@ type ConvertOptions struct {
 	ExtractImages bool
 	DetectTables  bool
 	Password      string // PDF password if encrypted
+	// Strict stops conversion on the first page error. By default conversion is
+	// tolerant and records page-level failures in ConvertResult.Warnings.
+	Strict bool
+	// Context supports cancellation of multi-page conversion. Nil means Background.
+	Context context.Context `json:"-"`
+}
+
+// ConversionWarning describes a recoverable page conversion failure.
+type ConversionWarning struct {
+	Page    int    `json:"page"` // 1-based page number
+	Message string `json:"message"`
 }
 
 // ConvertResult is the final output of a PDF-to-HTML conversion.
@@ -87,6 +100,7 @@ type ConvertResult struct {
 	Text     string
 	Pages    []PageResult
 	Metadata map[string]string
+	Warnings []ConversionWarning
 }
 
 // ProgressFunc is called during conversion to report progress.

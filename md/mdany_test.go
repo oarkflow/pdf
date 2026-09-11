@@ -70,14 +70,14 @@ func readDocxPart(t *testing.T, docx []byte, name string) []byte {
 	return nil
 }
 
-func TestPDFRendersCareStyleHeadingAndTOCLines(t *testing.T) {
+func TestPDFRendersHeadingAndTOC(t *testing.T) {
 	input := []byte("# Main\n\n## Section\n\nContent\n\n## Next\n\nMore content\n")
 	pdfOut, err := Convert(input, PDF, Options{Title: "x", TOC: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(pdfOut, []byte(" l S")) {
-		t.Fatal("pdf should render subtle CARE-style heading/TOC separator lines")
+	if !bytes.Contains(pdfOut, []byte("/FlateDecode")) {
+		t.Fatal("pdf should use the shared compressed document writer")
 	}
 }
 
@@ -87,7 +87,7 @@ func TestPDFTOCEntriesAreClickable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, needle := range [][]byte{[]byte("/Subtype /Link"), []byte("/Annots ["), []byte("/Dest [")} {
+	for _, needle := range [][]byte{[]byte("/Subtype /Link"), []byte("/Annots ["), []byte("/Dest (section-one)"), []byte("/Names")} {
 		if !bytes.Contains(pdfOut, needle) {
 			t.Fatalf("pdf TOC is not clickable; missing %s", needle)
 		}

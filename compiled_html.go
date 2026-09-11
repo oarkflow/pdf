@@ -243,6 +243,7 @@ func (c *CompiledHTML) buildDocument() (*document.Document, error) {
 		}
 		applyExtGStates(p, pr.ExtGStates)
 		p.Annotations = pr.Links
+		p.Destinations = pr.Destinations
 		p.Structure = append(p.Structure, pr.Structure...)
 		doc.AddPage(p)
 	}

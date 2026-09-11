@@ -4,14 +4,15 @@ import "fmt"
 
 // PageResult holds the rendered output for a single page.
 type PageResult struct {
-	Content    []byte
-	Fonts      map[string]FontEntry
-	Images     map[string]ImageEntry
-	Links      []LinkAnnotation
-	ExtGStates map[string]ExtGState
-	Structure  []StructureElement
-	Width      float64
-	Height     float64
+	Content      []byte
+	Fonts        map[string]FontEntry
+	Images       map[string]ImageEntry
+	Links        []LinkAnnotation
+	Destinations []NamedDestination
+	ExtGStates   map[string]ExtGState
+	Structure    []StructureElement
+	Width        float64
+	Height       float64
 }
 
 // RenderPages takes a list of elements and renders them across pages.
@@ -91,14 +92,15 @@ func renderPagesWithHF(elements []Element, headerEls, footerEls []Element, pageW
 			drawBlocksFn(footerBlocks, marginLeft, footerY, currentCtx, &currentStruct, &nextMCID, pageHeight, len(pages), tagged)
 		}
 		pages = append(pages, PageResult{
-			Content:    currentCtx.ContentStream,
-			Fonts:      currentCtx.Fonts,
-			Images:     currentCtx.Images,
-			Links:      currentCtx.Links,
-			ExtGStates: currentCtx.ExtGStates,
-			Structure:  currentStruct,
-			Width:      pageWidth,
-			Height:     pageHeight,
+			Content:      currentCtx.ContentStream,
+			Fonts:        currentCtx.Fonts,
+			Images:       currentCtx.Images,
+			Links:        currentCtx.Links,
+			Destinations: currentCtx.Destinations,
+			ExtGStates:   currentCtx.ExtGStates,
+			Structure:    currentStruct,
+			Width:        pageWidth,
+			Height:       pageHeight,
 		})
 	}
 
@@ -180,6 +182,9 @@ func drawBlocksFn(blocks []PlacedBlock, offsetX, offsetY float64, ctx *DrawConte
 	for _, b := range blocks {
 		absX := offsetX + b.X
 		absTopY := offsetY + b.Y
+		if b.Destination != "" {
+			ctx.Destinations = append(ctx.Destinations, NamedDestination{Name: b.Destination, X: absX, Y: pageHeight - absTopY})
+		}
 		var mcid int
 		hasTag := tagged && b.Tag != ""
 		structOnly := hasTag && b.StructOnly

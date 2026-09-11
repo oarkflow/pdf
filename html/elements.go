@@ -60,6 +60,7 @@ func (e *ParagraphElement) PlanLayout(area layout.LayoutArea) layout.LayoutPlan 
 // HeadingElement renders a heading.
 type HeadingElement struct {
 	Level    int
+	ID       string
 	Runs     []layout.TextRun
 	Style    *ComputedStyle
 	BoxModel layout.BoxModel
@@ -93,6 +94,9 @@ func (e *HeadingElement) PlanLayout(area layout.LayoutArea) layout.LayoutPlan {
 	tag := fmt.Sprintf("H%d", e.Level)
 	for i := range plan.Blocks {
 		plan.Blocks[i].Tag = tag
+	}
+	if len(plan.Blocks) > 0 {
+		plan.Blocks[0].Destination = e.ID
 	}
 	return plan
 }

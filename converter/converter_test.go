@@ -1,6 +1,7 @@
 package converter
 
 import (
+	"context"
 	"os"
 	"strings"
 	"testing"
@@ -75,6 +76,31 @@ func TestConvertPositioned(t *testing.T) {
 	}
 	if !strings.Contains(result.HTML, "text-span") {
 		t.Error("positioned mode should use text-span class")
+	}
+}
+
+func TestNewRejectsUnknownMode(t *testing.T) {
+	if _, err := New([]byte("%PDF-1.4\n"), ConvertOptions{Mode: "mystery"}); err == nil || !strings.Contains(err.Error(), "unsupported mode") {
+		t.Fatalf("New error = %v, want unsupported mode", err)
+	}
+}
+
+func TestNormalizeConvertOptionsContext(t *testing.T) {
+	var opts ConvertOptions
+	if err := normalizeConvertOptions(&opts); err != nil {
+		t.Fatal(err)
+	}
+	if opts.Context == nil || opts.Context != context.Background() {
+		t.Fatal("expected a background conversion context")
+	}
+	if opts.Mode != "reflowed" {
+		t.Fatalf("mode = %q, want reflowed", opts.Mode)
+	}
+}
+
+func TestNewFromReaderRejectsNil(t *testing.T) {
+	if _, err := NewFromReader(nil, ConvertOptions{}); err == nil {
+		t.Fatal("expected nil reader error")
 	}
 }
 

@@ -10,6 +10,8 @@ import (
 	"crypto/x509"
 	"fmt"
 	"os"
+
+	"github.com/oarkflow/pdf/core"
 )
 
 // Signer abstracts the signing operation for PDF digital signatures.
@@ -37,7 +39,7 @@ type Options struct {
 	Location    string
 	ContactInfo string
 	Name        string
-	TSAURL      string             // RFC 3161 timestamp authority URL
+	TSAURL      string              // RFC 3161 timestamp authority URL
 	CertStore   []*x509.Certificate // for LTV
 }
 
@@ -79,7 +81,7 @@ func NewLocalSigner(key crypto.Signer, chain []*x509.Certificate) *LocalSigner {
 	}
 }
 
-func (s *LocalSigner) Certificate() *x509.Certificate      { return s.cert }
+func (s *LocalSigner) Certificate() *x509.Certificate        { return s.cert }
 func (s *LocalSigner) CertificateChain() []*x509.Certificate { return s.chain }
 func (s *LocalSigner) Algorithm() x509.SignatureAlgorithm    { return s.algorithm }
 
@@ -98,7 +100,7 @@ func SignFile(inputPath, outputPath string, opts Options) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(outputPath, signed, 0o644)
+	return core.WriteFileAtomic(outputPath, signed, 0o644)
 }
 
 // SignBytes signs PDF bytes in memory.

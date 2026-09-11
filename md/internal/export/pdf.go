@@ -8,6 +8,10 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/oarkflow/pdf/core"
+	"github.com/oarkflow/pdf/document"
+	pdfhtml "github.com/oarkflow/pdf/html"
+	"github.com/oarkflow/pdf/layout"
 	"github.com/oarkflow/pdf/md/internal/markdown"
 )
 
@@ -44,27 +48,94 @@ type pdfWriter struct {
 
 func (PDF) Export(d markdown.Doc, o Options) ([]byte, error) {
 	applyMeta(&o, d)
-	pw := &pdfWriter{pageW: 595, pageH: 842, margin: o.Margin, destinations: make(map[string]pdfDestination)}
-	if strings.EqualFold(o.PageSize, "letter") {
-		pw.pageW, pw.pageH = 612, 792
+	markup, err := (HTML{}).Export(d, o)
+	if err != nil {
+		return nil, fmt.Errorf("rendering Markdown HTML: %w", err)
 	}
-	if pw.margin <= 0 {
-		pw.margin = 54
+	opts := o.HTML
+	if opts.PageSize == [2]float64{} {
+		w, h, err := markdownPageSize(o.PageSize)
+		if err != nil {
+			return nil, err
+		}
+		opts.PageSize = [2]float64{w, h}
 	}
-	// The PDF renderer follows a clean modern business-report layout: generous
-	// margins, strong typography, subtle section separators, airy paragraphs and
-	// borderless striped tables with dark header bands. This intentionally matches
-	// the provided CARE status proposal style while keeping mdany fully native.
-	pw.contentW = pw.pageW - 2*pw.margin
-	pw.newPage()
-	if o.TOC && len(d.Headings) > 1 {
-		pw.pdfTOC(d.Headings)
-		pw.newPage()
+	if opts.Margins == [4]float64{} {
+		margin := o.Margin
+		if margin <= 0 {
+			margin = 54
+		}
+		opts.Margins = [4]float64{margin, margin, margin, margin}
 	}
-	for _, n := range d.Nodes {
-		pw.node(n)
+	result, err := pdfhtml.Convert(string(markup), opts)
+	if err != nil {
+		return nil, fmt.Errorf("laying out Markdown: %w", err)
 	}
-	return buildPDF(pw.pages, pw.destinations, pw.links, o, pw.pageW, pw.pageH, pw.margin)
+	pages := layout.RenderPagesWithHeaderFooter(
+		result.Elements, result.HeaderElements, result.FooterElements,
+		result.Config.Width, result.Config.Height,
+		result.Config.Margins[0], result.Config.Margins[1], result.Config.Margins[2], result.Config.Margins[3],
+	)
+	doc, err := document.NewDocument(document.PageSize{Width: result.Config.Width, Height: result.Config.Height})
+	if err != nil {
+		return nil, err
+	}
+	doc.SetMargins(document.Margins{Top: result.Config.Margins[0], Right: result.Config.Margins[1], Bottom: result.Config.Margins[2], Left: result.Config.Margins[3]})
+	doc.SetMetadata(document.Metadata{Title: defaultTitle(o.Title), Author: o.Author, Creator: "mdany", Producer: "github.com/oarkflow/pdf"})
+	if opts.Encryption != nil {
+		doc.SetEncryption(*opts.Encryption)
+	}
+	for _, rendered := range pages {
+		page := document.NewPage(document.PageSize{Width: rendered.Width, Height: rendered.Height})
+		page.Contents = rendered.Content
+		for _, entry := range rendered.Fonts {
+			page.FontEntries[entry.PDFName] = entry
+		}
+		for name, entry := range rendered.Images {
+			page.Images[name] = entry
+		}
+		applyMarkdownExtGStates(page, rendered.ExtGStates)
+		page.Annotations = rendered.Links
+		page.Destinations = rendered.Destinations
+		doc.AddPage(page)
+	}
+	var out bytes.Buffer
+	if _, err := doc.WriteTo(&out); err != nil {
+		return nil, fmt.Errorf("writing Markdown PDF: %w", err)
+	}
+	return out.Bytes(), nil
+}
+
+func markdownPageSize(name string) (float64, float64, error) {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "", "a4":
+		return 595.28, 841.89, nil
+	case "a3":
+		return 841.89, 1190.55, nil
+	case "a5":
+		return 419.53, 595.28, nil
+	case "letter":
+		return 612, 792, nil
+	case "legal":
+		return 612, 1008, nil
+	default:
+		return 0, 0, fmt.Errorf("unsupported Markdown page size %q", name)
+	}
+}
+
+func applyMarkdownExtGStates(page *document.Page, states map[string]layout.ExtGState) {
+	if len(states) == 0 {
+		return
+	}
+	resources := core.NewDictionary()
+	for name, state := range states {
+		dict := core.NewDictionary()
+		dict.Set("Type", core.PdfName("ExtGState"))
+		dict.Set("ca", core.PdfNumber(state.FillAlpha))
+		dict.Set("CA", core.PdfNumber(state.StrokeAlpha))
+		resources.Set(name, dict)
+	}
+	page.Resources.Set("ExtGState", resources)
 }
 
 func (p *pdfWriter) newPage() {

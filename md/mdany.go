@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 
+	pdfhtml "github.com/oarkflow/pdf/html"
 	"github.com/oarkflow/pdf/md/internal/export"
 	"github.com/oarkflow/pdf/md/internal/markdown"
 )
@@ -27,6 +28,9 @@ type Options struct {
 	TOC                     bool
 	Standalone              bool
 	SoftHR                  bool
+	// HTML configures the shared HTML/layout pipeline used for PDF output. It
+	// enables custom fonts, assets, encryption, and the other HTML renderer options.
+	HTML pdfhtml.Options
 }
 
 func Convert(input []byte, format Format, opt Options) ([]byte, error) {
@@ -38,7 +42,7 @@ func ConvertReader(r io.Reader, format Format, opt Options) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	eo := export.Options{Title: opt.Title, Author: opt.Author, PageSize: opt.PageSize, Margin: opt.Margin, Theme: opt.Theme, CSS: opt.CSS, TOC: opt.TOC, Standalone: opt.Standalone, SoftHR: opt.SoftHR}
+	eo := export.Options{Title: opt.Title, Author: opt.Author, PageSize: opt.PageSize, Margin: opt.Margin, Theme: opt.Theme, CSS: opt.CSS, TOC: opt.TOC, Standalone: opt.Standalone, SoftHR: opt.SoftHR, HTML: opt.HTML}
 	switch Format(strings.ToLower(string(format))) {
 	case PDF:
 		return export.PDF{}.Export(d, eo)

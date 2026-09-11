@@ -1,6 +1,9 @@
 package export
 
-import "github.com/oarkflow/pdf/md/internal/markdown"
+import (
+	pdfhtml "github.com/oarkflow/pdf/html"
+	"github.com/oarkflow/pdf/md/internal/markdown"
+)
 
 type Options struct {
 	Title      string
@@ -12,6 +15,7 @@ type Options struct {
 	TOC        bool
 	Standalone bool
 	SoftHR     bool
+	HTML       pdfhtml.Options
 }
 
 type Exporter interface {

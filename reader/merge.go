@@ -98,7 +98,7 @@ func MergeFiles(paths []string, outputPath string) error {
 		return err
 	}
 
-	return os.WriteFile(outputPath, merged, 0644)
+	return core.WriteFileAtomic(outputPath, merged, 0644)
 }
 
 // ExtractPages copies selected 0-based pages from one PDF into a new PDF.
@@ -179,7 +179,7 @@ func ExtractPagesFile(inputPath, outputPath string, pages []int, password string
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(outputPath, extracted, 0644)
+	return core.WriteFileAtomic(outputPath, extracted, 0644)
 }
 
 // CopyPagesFile copies pages from inputPath to outputPath with the given options.
@@ -192,7 +192,7 @@ func CopyPagesFile(inputPath, outputPath string, opts CopyOptions) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(outputPath, out, 0644)
+	return core.WriteFileAtomic(outputPath, out, 0644)
 }
 
 func buildMergePage(w *document.Writer, page *PageInfo, suffix string, reader *Reader) (*document.Page, map[string]int, map[string]layout.ImageEntry, error) {

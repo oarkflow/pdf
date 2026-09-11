@@ -33,18 +33,19 @@ func DefaultMargins() Margins {
 
 // Page represents a single PDF page.
 type Page struct {
-	Size        PageSize
-	Resources   *core.PdfDictionary
-	Contents    []byte
-	Rotation    int
-	Fonts       map[string]int // font name -> object number
-	FontEntries map[string]layout.FontEntry
-	Images      map[string]layout.ImageEntry
-	Annotations []layout.LinkAnnotation
-	Structure   []layout.StructureElement
-	contentOnce sync.Once
-	contentData []byte
-	contentErr  error
+	Size         PageSize
+	Resources    *core.PdfDictionary
+	Contents     []byte
+	Rotation     int
+	Fonts        map[string]int // font name -> object number
+	FontEntries  map[string]layout.FontEntry
+	Images       map[string]layout.ImageEntry
+	Annotations  []layout.LinkAnnotation
+	Destinations []layout.NamedDestination
+	Structure    []layout.StructureElement
+	contentOnce  sync.Once
+	contentData  []byte
+	contentErr   error
 }
 
 // NewPage creates a new page with the given size.

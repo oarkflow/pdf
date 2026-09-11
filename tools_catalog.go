@@ -5,6 +5,9 @@ type ToolStatus string
 
 const (
 	ToolAvailable ToolStatus = "available"
+	ToolBeta      ToolStatus = "beta"
+	ToolLimited   ToolStatus = "limited"
+	ToolExternal  ToolStatus = "external-validator-required"
 )
 
 // ToolCapability describes one user-facing PDF tool capability.
@@ -27,16 +30,16 @@ func ToolCatalog() []ToolCapability {
 		{Key: "signature-image", Name: "Signature image placement", Category: "Signature tools", Status: ToolAvailable, Description: "Place uploaded signature images on selected PDF pages."},
 		{Key: "conversion", Name: "Conversion", Category: "Conversion tools", Status: ToolAvailable, Description: "Convert Markdown, HTML, and images to PDF, and convert PDFs to text, HTML, Markdown, JSON, and extracted images."},
 		{Key: "scanner", Name: "Scanner workflow", Category: "Scanner tools", Status: ToolAvailable, Description: "Convert scanned image batches into paginated PDFs."},
-		{Key: "compression", Name: "Compression", Category: "Compression tools", Status: ToolAvailable, Description: "Rewrite PDFs through compressed page streams and normalized copied resources."},
+		{Key: "compression", Name: "Compression", Category: "Compression tools", Status: ToolLimited, Description: "Losslessly rewrite PDFs through compressed page streams and normalized copied resources; image resampling is not yet included."},
 		{Key: "security", Name: "Security", Category: "Security tools", Status: ToolAvailable, Description: "Protect and decrypt PDFs with password-based encryption."},
-		{Key: "redaction", Name: "Redaction", Category: "Redaction tools", Status: ToolAvailable, Description: "Remove matching literal text from content streams and cover configured regions."},
+		{Key: "redaction", Name: "Redaction", Category: "Redaction tools", Status: ToolLimited, Description: "Remove matching literal strings from content streams; rectangular regions are visual overlays, not secure content removal."},
 		{Key: "organization", Name: "Page organization", Category: "Organization tools", Status: ToolAvailable, Description: "Merge, split, delete, reorder, rotate, watermark, number pages, and update metadata."},
 		{Key: "annotation-review", Name: "Annotation and review", Category: "Annotation/review tools", Status: ToolAvailable, Description: "Read annotations, links, widget metadata, outlines, and review-related document information."},
-		{Key: "comparison", Name: "PDF comparison", Category: "Comparison tools", Status: ToolAvailable, Description: "Compare page counts, extracted text, and metadata."},
-		{Key: "translation", Name: "Translation", Category: "Translation tools", Status: ToolAvailable, Description: "Apply dictionary-based text replacements inside literal PDF text streams."},
-		{Key: "validation", Name: "Validation", Category: "Validation tools", Status: ToolAvailable, Description: "Validate PDF structure and compliance profiles including PDF/A, PDF/UA, PDF/X, PDF/E, PDF/VT, and PAdES."},
+		{Key: "comparison", Name: "PDF comparison", Category: "Comparison tools", Status: ToolLimited, Description: "Compare page counts, extracted text, and metadata; visual comparison is not yet included."},
+		{Key: "translation", Name: "Translation", Category: "Translation tools", Status: ToolLimited, Description: "Apply dictionary-based replacements inside literal PDF strings; this is not document-aware machine translation."},
+		{Key: "validation", Name: "Validation", Category: "Validation tools", Status: ToolBeta, Description: "Validate PDF structure plus native PDF/A and PDF/UA checks; PDF/X, PDF/E, PDF/VT, and PAdES require an external validator."},
 		{Key: "print-prep", Name: "Print preparation", Category: "Print preparation tools", Status: ToolAvailable, Description: "Normalize PDFs with metadata and optional page numbering for print handoff."},
-		{Key: "archive", Name: "Archive", Category: "Archive tools", Status: ToolAvailable, Description: "Write archive copies and run PDF/A-oriented validation."},
+		{Key: "archive", Name: "Archive", Category: "Archive tools", Status: ToolLimited, Description: "Write normalized archive copies and run PDF/A-oriented validation; arbitrary input is not automatically converted to PDF/A."},
 		{Key: "graph", Name: "Related PDF graph", Category: "Related PDF graph tools", Status: ToolAvailable, Description: "Build relationship graphs across PDFs using links and metadata."},
 	}
 }

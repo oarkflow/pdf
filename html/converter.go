@@ -704,6 +704,7 @@ func (c *converter) convertHeading(node *Node) layout.Element {
 	runs := c.collectTextRuns(node)
 	return &HeadingElement{
 		Level:    level,
+		ID:       node.GetAttribute("id"),
 		Runs:     runs,
 		Style:    node.Style,
 		BoxModel: c.computeBoxModel(node.Style),

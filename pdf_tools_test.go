@@ -121,7 +121,7 @@ func TestExtraPDFTools(t *testing.T) {
 		t.Fatalf("CompressPDF failed: %v", err)
 	}
 	assertPDFPages(t, compressed, 1)
-	if err := Redact(input, redacted, RedactOptions{Texts: []string{"Secret"}}); err != nil {
+	if err := Redact(input, redacted, RedactOptions{Texts: []string{"Secret"}, Verify: true}); err != nil {
 		t.Fatalf("Redact failed: %v", err)
 	}
 	redactedText, err := ToText(redacted)
@@ -158,6 +158,55 @@ func TestExtraPDFTools(t *testing.T) {
 	}
 	if len(graph.Nodes) != 2 {
 		t.Fatalf("graph nodes = %#v, want 2", graph.Nodes)
+	}
+}
+
+func TestRedactRequiresVisualRegionAcknowledgement(t *testing.T) {
+	dir := t.TempDir()
+	input := filepath.Join(dir, "source.pdf")
+	writeTextPDF(t, input, "Visible")
+	err := Redact(input, filepath.Join(dir, "covered.pdf"), RedactOptions{
+		Regions: []RedactionRegion{{Page: 1, X: 1, Y: 1, Width: 10, Height: 10}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "visual covers") {
+		t.Fatalf("Redact error = %v, want visual-cover acknowledgement error", err)
+	}
+}
+
+func TestRedactUsesVisiblePlaceholder(t *testing.T) {
+	dir := t.TempDir()
+	input := filepath.Join(dir, "source.pdf")
+	output := filepath.Join(dir, "redacted.pdf")
+	writeTextPDF(t, input, "The secret code is ALPHA-42.")
+	if err := Redact(input, output, RedactOptions{Texts: []string{"ALPHA-42"}, Verify: true}); err != nil {
+		t.Fatalf("Redact failed: %v", err)
+	}
+	text, err := ToText(output)
+	if err != nil {
+		t.Fatalf("ToText redacted failed: %v", err)
+	}
+	if strings.Contains(text, "ALPHA-42") {
+		t.Fatalf("redacted text still contains secret: %q", text)
+	}
+	if !strings.Contains(text, "XXXXXXXX") {
+		t.Fatalf("redacted text should contain a visible placeholder, got %q", text)
+	}
+}
+
+func TestOptimizePDFReportAndUnsupportedProfile(t *testing.T) {
+	dir := t.TempDir()
+	input := filepath.Join(dir, "source.pdf")
+	output := filepath.Join(dir, "optimized.pdf")
+	writeTextPDF(t, input, "Optimize me")
+	report, err := OptimizePDF(input, output, OptimizeOptions{Profile: OptimizeLossless})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.InputBytes <= 0 || report.OutputBytes <= 0 || report.Profile != OptimizeLossless {
+		t.Fatalf("unexpected report: %#v", report)
+	}
+	if _, err := OptimizePDF(input, output, OptimizeOptions{Profile: "screen"}); err == nil {
+		t.Fatal("expected unsupported optimization profile error")
 	}
 }
 

@@ -14,8 +14,8 @@ import (
 	"github.com/oarkflow/pdf/document"
 	"github.com/oarkflow/pdf/html"
 	"github.com/oarkflow/pdf/layout"
-	"github.com/oarkflow/pdf/md"
 	markdownrenderer "github.com/oarkflow/pdf/markdown"
+	"github.com/oarkflow/pdf/md"
 	"github.com/oarkflow/pdf/reader"
 	"github.com/oarkflow/pdf/template"
 )
@@ -69,6 +69,7 @@ func Quick(text string, outputPath string) error {
 		}
 		applyExtGStates(p, pr.ExtGStates)
 		p.Annotations = pr.Links
+		p.Destinations = pr.Destinations
 		doc.AddPage(p)
 	}
 
@@ -124,6 +125,29 @@ func FromMarkdown(markdownContent, outputPath string, opts ...MarkdownOptions) e
 	if opt.Margin == 0 {
 		opt.Margin = 54
 	}
+	return core.WriteAtomic(outputPath, 0644, func(w io.Writer) error {
+		return WriteMarkdownToPDF(w, markdownContent, opt)
+	})
+}
+
+// WriteMarkdownToPDF renders Markdown to an arbitrary writer.
+func WriteMarkdownToPDF(out io.Writer, markdownContent string, opts ...MarkdownOptions) error {
+	if out == nil {
+		return errors.New("pdf: writer is nil")
+	}
+	if strings.TrimSpace(markdownContent) == "" {
+		return errors.New("pdf: Markdown content is empty")
+	}
+	var opt MarkdownOptions
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
+	if opt.PageSize == "" {
+		opt.PageSize = "a4"
+	}
+	if opt.Margin == 0 {
+		opt.Margin = 54
+	}
 	pdfBytes, err := md.Convert([]byte(markdownContent), md.PDF, md.Options{
 		Title:    opt.Title,
 		Author:   opt.Author,
@@ -133,11 +157,13 @@ func FromMarkdown(markdownContent, outputPath string, opts ...MarkdownOptions) e
 		PageSize: opt.PageSize,
 		TOC:      opt.TOC,
 		SoftHR:   opt.SoftHR,
+		HTML:     opt.HTML,
 	})
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(outputPath, pdfBytes, 0644)
+	_, err = out.Write(pdfBytes)
+	return err
 }
 
 // FromLeanHTML converts HTML content to a lean PDF file.
@@ -148,12 +174,9 @@ func FromLeanHTML(htmlContent string, outputPath string, opts ...html.Options) e
 	if outputPath == "" {
 		return errors.New("pdf: output path is empty")
 	}
-	f, err := os.Create(outputPath)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	return WriteLeanHTMLToPDF(f, htmlContent, opts...)
+	return core.WriteAtomic(outputPath, 0644, func(w io.Writer) error {
+		return WriteLeanHTMLToPDF(w, htmlContent, opts...)
+	})
 }
 
 // FromCompliantHTML converts HTML content to a compliant PDF file using
@@ -171,12 +194,9 @@ func FromCompliantHTMLWithOptions(htmlContent string, outputPath string, complia
 	if outputPath == "" {
 		return errors.New("pdf: output path is empty")
 	}
-	f, err := os.Create(outputPath)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	return WriteCompliantHTMLToPDFWithOptions(f, htmlContent, compliance, opts...)
+	return core.WriteAtomic(outputPath, 0644, func(w io.Writer) error {
+		return WriteCompliantHTMLToPDFWithOptions(w, htmlContent, compliance, opts...)
+	})
 }
 
 // ToHTML converts a PDF file to an HTML document.
@@ -537,18 +557,29 @@ type PageNumberOptions struct {
 	Format   string
 	FontSize float64
 	Margin   float64
+	X        float64
+	Y        float64
+	Color    [3]float64
+	Pages    []int
 	Password string
 }
 
-// AddPageNumbers stamps page numbers onto every page.
+// AddPageNumbers stamps page numbers onto selected pages or every page by default.
 func AddPageNumbers(inputPath, outputPath string, opts PageNumberOptions) error {
 	info, err := Info(inputPath, opts.Password)
+	if err != nil {
+		return err
+	}
+	selected, err := pageNumberSet(opts.Pages, info.Pages)
 	if err != nil {
 		return err
 	}
 	return reader.CopyPagesFile(inputPath, outputPath, reader.CopyOptions{
 		Password: opts.Password,
 		Overlay: func(pageIndex int, page *document.Page) []byte {
+			if len(selected) > 0 && !selected[pageIndex+1] {
+				return nil
+			}
 			format := opts.Format
 			if format == "" {
 				format = "Page %d of %d"
@@ -563,12 +594,48 @@ func AddPageNumbers(inputPath, outputPath string, opts PageNumberOptions) error 
 				margin = 36
 			}
 			page.Fonts["FPN"] = 0
-			x := page.Size.Width / 2
-			y := margin
-			return []byte(fmt.Sprintf("\nBT /FPN %.2f Tf %.3f %.3f Td (%s) Tj ET\n",
-				size, x-float64(len(text))*size*0.22, y, escapePDFText(text)))
+			x := opts.X
+			y := opts.Y
+			if x == 0 && y == 0 {
+				x = page.Size.Width / 2
+				y = margin
+			}
+			color := opts.Color
+			if color == [3]float64{} {
+				color = [3]float64{0, 0, 0}
+			}
+			return []byte(fmt.Sprintf("\nq %.3f %.3f %.3f rg BT /FPN %.2f Tf %.3f %.3f Td (%s) Tj ET Q\n",
+				color[0], color[1], color[2], size, x-float64(len(text))*size*0.22, y, escapePDFText(text)))
 		},
 	})
+}
+
+func pageNumberSet(pages []int, totalPages int) (map[int]bool, error) {
+	if len(pages) == 0 {
+		return nil, nil
+	}
+	selected := make(map[int]bool, len(pages))
+	zeroBased := false
+	for _, page := range pages {
+		if page == 0 {
+			zeroBased = true
+			break
+		}
+	}
+	for _, page := range pages {
+		if zeroBased {
+			if page < 0 || page >= totalPages {
+				return nil, fmt.Errorf("pdf: page %d out of range [0, %d)", page, totalPages)
+			}
+			selected[page+1] = true
+			continue
+		}
+		if page < 1 || page > totalPages {
+			return nil, fmt.Errorf("pdf: page %d out of range [1, %d]", page, totalPages)
+		}
+		selected[page] = true
+	}
+	return selected, nil
 }
 
 func pagesToSet(pages []int) map[int]bool {
@@ -701,6 +768,7 @@ func FromHTMLStreaming(htmlContent string, out io.Writer, opts ...html.Options) 
 		}
 		applyExtGStates(p, pr.ExtGStates)
 		p.Annotations = pr.Links
+		p.Destinations = pr.Destinations
 		doc.AddPage(p)
 	}
 

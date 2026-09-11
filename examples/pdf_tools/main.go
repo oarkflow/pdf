@@ -105,7 +105,8 @@ func main() {
 		exitErr(err)
 	}
 	if err := pdf.Redact(sourcePDF, redactedPDF, pdf.RedactOptions{
-		Texts: []string{"Secret"},
+		AllowVisualRegions: true,
+		Texts:              []string{"Secret"},
 		Regions: []pdf.RedactionRegion{{
 			Page: 1, X: 72, Y: 700, Width: 100, Height: 16,
 		}},

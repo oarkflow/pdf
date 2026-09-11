@@ -3,7 +3,6 @@ package document
 import (
 	"errors"
 	"io"
-	"os"
 
 	"github.com/oarkflow/pdf/core"
 )
@@ -87,6 +86,11 @@ func (d *Document) AddPage(p *Page) {
 	if p == nil {
 		return
 	}
+	for _, page := range d.pages {
+		if page == p {
+			return
+		}
+	}
 	d.pages = append(d.pages, p)
 }
 func (d *Document) SetHeader(fn PageDecorator)              { d.header = fn }
@@ -159,13 +163,10 @@ func (d *Document) NewPage() *Page {
 
 // Save writes the PDF to the given file path.
 func (d *Document) Save(path string) error {
-	f, err := os.Create(path)
-	if err != nil {
+	return core.WriteAtomic(path, 0644, func(w io.Writer) error {
+		_, err := d.WriteTo(w)
 		return err
-	}
-	defer f.Close()
-	_, err = d.WriteTo(f)
-	return err
+	})
 }
 
 // WriteTo serializes the document as a complete PDF to w.
@@ -221,15 +222,16 @@ func (d *Document) WriteTo(w io.Writer) (int64, error) {
 		}
 
 		p := &Page{
-			Size:        page.Size,
-			Resources:   page.Resources,
-			Contents:    content,
-			Rotation:    page.Rotation,
-			Fonts:       page.Fonts,
-			FontEntries: page.FontEntries,
-			Images:      page.Images,
-			Annotations: page.Annotations,
-			Structure:   page.Structure,
+			Size:         page.Size,
+			Resources:    page.Resources,
+			Contents:     content,
+			Rotation:     page.Rotation,
+			Fonts:        page.Fonts,
+			FontEntries:  page.FontEntries,
+			Images:       page.Images,
+			Annotations:  page.Annotations,
+			Destinations: page.Destinations,
+			Structure:    page.Structure,
 		}
 		if _, err := wr.AddPage(p); err != nil {
 			return 0, err

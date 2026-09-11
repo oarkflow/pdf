@@ -34,6 +34,7 @@ type PlacedBlock struct {
 	X, Y, Width, Height float64
 	Draw                func(ctx *DrawContext, x, topY float64)
 	Tag                 string // PDF structure tag (P, H1, Table, etc.)
+	Destination         string // named destination anchored at the block's top edge
 	StructOnly          bool   // structure container without its own MCID
 	AltText             string
 	Children            []PlacedBlock
@@ -57,12 +58,19 @@ type LinkAnnotation struct {
 	URI            string
 }
 
+// NamedDestination identifies an intra-document navigation target.
+type NamedDestination struct {
+	Name string
+	X, Y float64
+}
+
 // DrawContext provides drawing capabilities during rendering.
 type DrawContext struct {
 	ContentStream []byte
 	Fonts         map[string]FontEntry
 	Images        map[string]ImageEntry
 	Links         []LinkAnnotation
+	Destinations  []NamedDestination
 	ExtGStates    map[string]ExtGState
 	PageWidth     float64
 	PageHeight    float64

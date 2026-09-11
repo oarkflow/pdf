@@ -168,6 +168,10 @@ func markdownCommand() *cli.Command {
 			&cli.StringFlag{Name: "theme", Value: "classic", Usage: "typography theme: classic or modern"},
 			&cli.StringFlag{Name: "title", Usage: "PDF document title (defaults to the first heading)"},
 			&cli.StringFlag{Name: "css", Usage: "additional print stylesheet", TakesFile: true},
+			&cli.StringFlag{Name: "page-size", Value: "a4", Usage: "page size: a3, a4, a5, letter, or legal"},
+			&cli.FloatFlag{Name: "margin", Value: 54, Usage: "page margin in points"},
+			&cli.BoolFlag{Name: "toc", Usage: "include a linked table of contents"},
+			&cli.BoolFlag{Name: "soft-hr", Usage: "render thematic breaks as spacing"},
 		},
 		Action: func(_ context.Context, cmd *cli.Command) error {
 			if cmd.NArg() < 1 {
@@ -199,6 +203,7 @@ func markdownCommand() *cli.Command {
 			}
 			opts := pdf.MarkdownOptions{
 				Title: cmd.String("title"), Theme: theme, Stylesheet: customCSS,
+				PageSize: cmd.String("page-size"), Margin: cmd.Float("margin"), TOC: cmd.Bool("toc"), SoftHR: cmd.Bool("soft-hr"),
 				HTML: html.Options{BaseURL: filepath.Dir(input)},
 			}
 			if err := pdf.FromMarkdown(string(content), output, opts); err != nil {
@@ -585,6 +590,7 @@ func convertTextLikeCommand(name string, aliases []string, usage, label string, 
 			&cli.StringFlag{Name: "pages", Usage: "1-based page range, e.g. 1-3,5"},
 			&cli.StringFlag{Name: "password", Usage: "PDF password"},
 			&cli.BoolFlag{Name: "prompt-password", Usage: "prompt for the PDF password"},
+			&cli.BoolFlag{Name: "strict", Usage: "stop on the first page conversion error"},
 		},
 		Action: func(_ context.Context, cmd *cli.Command) error {
 			if cmd.NArg() < 1 {
@@ -619,6 +625,7 @@ func toHTMLCommand() *cli.Command {
 			&cli.BoolFlag{Name: "prompt-password", Usage: "prompt for the PDF password"},
 			&cli.BoolFlag{Name: "images", Value: true, Usage: "extract images"},
 			&cli.BoolFlag{Name: "tables", Value: true, Usage: "detect tables"},
+			&cli.BoolFlag{Name: "strict", Usage: "stop on the first page conversion error"},
 		},
 		Action: func(_ context.Context, cmd *cli.Command) error {
 			if cmd.NArg() < 1 {
@@ -657,6 +664,7 @@ func toJSONCommand() *cli.Command {
 			&cli.StringFlag{Name: "pages", Usage: "1-based page range, e.g. 1-3,5"},
 			&cli.StringFlag{Name: "password", Usage: "PDF password"},
 			&cli.BoolFlag{Name: "prompt-password", Usage: "prompt for the PDF password"},
+			&cli.BoolFlag{Name: "strict", Usage: "stop on the first page conversion error"},
 		},
 		Action: func(_ context.Context, cmd *cli.Command) error {
 			if cmd.NArg() < 1 {
@@ -702,6 +710,7 @@ func extractImagesCommand() *cli.Command {
 			&cli.StringFlag{Name: "pages", Usage: "1-based page range, e.g. 1-3,5"},
 			&cli.StringFlag{Name: "password", Usage: "PDF password"},
 			&cli.BoolFlag{Name: "prompt-password", Usage: "prompt for the PDF password"},
+			&cli.BoolFlag{Name: "strict", Usage: "stop on the first page conversion error"},
 		},
 		Action: func(_ context.Context, cmd *cli.Command) error {
 			if cmd.NArg() < 1 {
@@ -1113,6 +1122,8 @@ func compressCommand() *cli.Command {
 		Category:  "Modify",
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "o", Aliases: []string{"output"}, Usage: "output PDF path", TakesFile: true, Required: true},
+			&cli.StringFlag{Name: "profile", Value: "lossless", Usage: "optimization profile: lossless"},
+			&cli.BoolFlag{Name: "json", Usage: "print optimization report as JSON"},
 			&cli.StringFlag{Name: "password", Usage: "PDF password"},
 			&cli.BoolFlag{Name: "prompt-password", Usage: "prompt for the PDF password"},
 		},
@@ -1120,10 +1131,19 @@ func compressCommand() *cli.Command {
 			if cmd.NArg() < 1 {
 				return usageError("pdf compress -o output.pdf <file.pdf>")
 			}
-			if err := pdf.CompressPDF(cmd.Args().First(), cmd.String("o"), passwordValue(cmd.String("password"), cmd.Bool("prompt-password"))); err != nil {
+			report, err := pdf.OptimizePDF(cmd.Args().First(), cmd.String("o"), pdf.OptimizeOptions{
+				Profile:  pdf.OptimizeProfile(cmd.String("profile")),
+				Password: passwordValue(cmd.String("password"), cmd.Bool("prompt-password")),
+			})
+			if err != nil {
 				return fmt.Errorf("compressing PDF: %w", err)
 			}
+			if cmd.Bool("json") {
+				writeJSON(os.Stdout, report)
+				return nil
+			}
 			fmt.Printf("Wrote compressed PDF to %s\n", cmd.String("o"))
+			fmt.Printf("Size: %d -> %d bytes (saved %d, %.1f%%)\n", report.InputBytes, report.OutputBytes, report.SavedBytes, report.SavedRatio*100)
 			return nil
 		},
 	}
@@ -1132,13 +1152,15 @@ func compressCommand() *cli.Command {
 func redactCommand() *cli.Command {
 	return &cli.Command{
 		Name:      "redact",
-		Usage:     "Redact literal text and rectangular regions",
+		Usage:     "Remove literal text or add acknowledged visual region covers",
 		ArgsUsage: "<file.pdf>",
 		Category:  "Modify",
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "o", Aliases: []string{"output"}, Usage: "output redacted PDF path", TakesFile: true, Required: true},
 			&cli.StringSliceFlag{Name: "text", Usage: "literal text to remove; repeatable"},
 			&cli.StringSliceFlag{Name: "region", Usage: "region page,x,y,width,height; repeatable"},
+			&cli.BoolFlag{Name: "allow-visual-regions", Usage: "acknowledge that region covers do not remove underlying objects"},
+			&cli.BoolFlag{Name: "verify", Value: true, Usage: "verify that requested text is no longer extractable"},
 			&cli.StringFlag{Name: "password", Usage: "PDF password"},
 			&cli.BoolFlag{Name: "prompt-password", Usage: "prompt for the PDF password"},
 		},
@@ -1151,9 +1173,11 @@ func redactCommand() *cli.Command {
 				return err
 			}
 			if err := pdf.Redact(cmd.Args().First(), cmd.String("o"), pdf.RedactOptions{
-				Texts:    cmd.StringSlice("text"),
-				Regions:  regions,
-				Password: passwordValue(cmd.String("password"), cmd.Bool("prompt-password")),
+				Texts:              cmd.StringSlice("text"),
+				Regions:            regions,
+				Password:           passwordValue(cmd.String("password"), cmd.Bool("prompt-password")),
+				Verify:             cmd.Bool("verify"),
+				AllowVisualRegions: cmd.Bool("allow-visual-regions"),
 			}); err != nil {
 				return fmt.Errorf("redacting PDF: %w", err)
 			}
@@ -1374,8 +1398,12 @@ func pageNumbersCommand() *cli.Command {
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "o", Aliases: []string{"output"}, Usage: "output PDF path", TakesFile: true, Required: true},
 			&cli.StringFlag{Name: "format", Value: "Page %d of %d", Usage: "fmt format with page and total"},
+			&cli.StringFlag{Name: "pages", Usage: "1-based pages to number, e.g. 1-3,5"},
 			&cli.FloatFlag{Name: "font-size", Value: 10, Usage: "font size"},
 			&cli.FloatFlag{Name: "margin", Value: 36, Usage: "bottom margin"},
+			&cli.FloatFlag{Name: "x", Usage: "x position in points"},
+			&cli.FloatFlag{Name: "y", Usage: "y position in points"},
+			&cli.StringFlag{Name: "color", Usage: "RGB triplet, e.g. 0.2,0.5,0.9"},
 			&cli.StringFlag{Name: "password", Usage: "PDF password"},
 			&cli.BoolFlag{Name: "prompt-password", Usage: "prompt for the PDF password"},
 		},
@@ -1383,10 +1411,36 @@ func pageNumbersCommand() *cli.Command {
 			if cmd.NArg() < 1 {
 				return usageError("pdf page-numbers -o output.pdf <file.pdf>")
 			}
+			pages := []int(nil)
+			if raw := cmd.String("pages"); raw != "" {
+				parsed, err := pdf.ParsePageSpec(raw)
+				if err != nil {
+					return fmt.Errorf("invalid pages %q: %w", raw, err)
+				}
+				pages = parsed
+			}
+			color := [3]float64{}
+			if raw := strings.TrimSpace(cmd.String("color")); raw != "" {
+				parts := strings.Split(raw, ",")
+				if len(parts) != 3 {
+					return fmt.Errorf("invalid color %q: expected 3 comma-separated RGB values", raw)
+				}
+				for i, part := range parts {
+					v, err := strconv.ParseFloat(strings.TrimSpace(part), 64)
+					if err != nil {
+						return fmt.Errorf("invalid color component %q: %w", part, err)
+					}
+					color[i] = v
+				}
+			}
 			err := pdf.AddPageNumbers(cmd.Args().First(), cmd.String("o"), pdf.PageNumberOptions{
 				Format:   cmd.String("format"),
 				FontSize: cmd.Float("font-size"),
 				Margin:   cmd.Float("margin"),
+				X:        cmd.Float("x"),
+				Y:        cmd.Float("y"),
+				Color:    color,
+				Pages:    pages,
 				Password: passwordValue(cmd.String("password"), cmd.Bool("prompt-password")),
 			})
 			if err != nil {
@@ -1444,7 +1498,7 @@ func setMetadataCommand() *cli.Command {
 }
 
 func convertOptionsFromCommand(cmd *cli.Command) (converter.ConvertOptions, error) {
-	opts := converter.ConvertOptions{Password: passwordValue(cmd.String("password"), cmd.Bool("prompt-password"))}
+	opts := converter.ConvertOptions{Password: passwordValue(cmd.String("password"), cmd.Bool("prompt-password")), Strict: cmd.Bool("strict")}
 	if page := cmd.Int("page"); page > 0 {
 		opts.Pages = []int{page - 1}
 	} else if spec := cmd.String("pages"); spec != "" {

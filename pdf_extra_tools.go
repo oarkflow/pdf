@@ -135,10 +135,64 @@ func SignatureImage(inputPath, outputPath string, opts ImageStampOptions) error 
 // CompressPDF rewrites a PDF through the writer, compressing page streams and
 // normalizing copied resources.
 func CompressPDF(inputPath, outputPath, password string) error {
-	return reader.CopyPagesFile(inputPath, outputPath, reader.CopyOptions{Password: password})
+	_, err := OptimizePDF(inputPath, outputPath, OptimizeOptions{Profile: OptimizeLossless, Password: password})
+	return err
 }
 
-// RedactionRegion describes a rectangular area to cover permanently.
+// OptimizeProfile selects an optimization strategy.
+type OptimizeProfile string
+
+const (
+	// OptimizeLossless compresses page streams and normalizes copied resources.
+	OptimizeLossless OptimizeProfile = "lossless"
+)
+
+// OptimizeOptions controls PDF optimization.
+type OptimizeOptions struct {
+	Profile  OptimizeProfile `json:"profile,omitempty"`
+	Password string          `json:"-"`
+}
+
+// OptimizationReport summarizes an optimization operation.
+type OptimizationReport struct {
+	Profile     OptimizeProfile `json:"profile"`
+	InputBytes  int64           `json:"inputBytes"`
+	OutputBytes int64           `json:"outputBytes"`
+	SavedBytes  int64           `json:"savedBytes"`
+	SavedRatio  float64         `json:"savedRatio"`
+}
+
+// OptimizePDF rewrites a PDF and reports the resulting size change. Only the
+// lossless profile is currently supported; unsupported profiles fail clearly.
+func OptimizePDF(inputPath, outputPath string, opts OptimizeOptions) (OptimizationReport, error) {
+	if opts.Profile == "" {
+		opts.Profile = OptimizeLossless
+	}
+	if opts.Profile != OptimizeLossless {
+		return OptimizationReport{}, fmt.Errorf("pdf: unsupported optimization profile %q (use lossless)", opts.Profile)
+	}
+	in, err := os.Stat(inputPath)
+	if err != nil {
+		return OptimizationReport{}, err
+	}
+	if err := reader.CopyPagesFile(inputPath, outputPath, reader.CopyOptions{Password: opts.Password}); err != nil {
+		return OptimizationReport{}, err
+	}
+	out, err := os.Stat(outputPath)
+	if err != nil {
+		return OptimizationReport{}, err
+	}
+	report := OptimizationReport{Profile: opts.Profile, InputBytes: in.Size(), OutputBytes: out.Size()}
+	report.SavedBytes = report.InputBytes - report.OutputBytes
+	if report.InputBytes > 0 {
+		report.SavedRatio = float64(report.SavedBytes) / float64(report.InputBytes)
+	}
+	return report, nil
+}
+
+// RedactionRegion describes a visual rectangular cover. A cover does not remove
+// underlying page objects; callers must explicitly opt in through
+// RedactOptions.AllowVisualRegions.
 type RedactionRegion struct {
 	Page   int     `json:"page"`
 	X      float64 `json:"x"`
@@ -149,9 +203,11 @@ type RedactionRegion struct {
 
 // RedactOptions controls text and region redaction.
 type RedactOptions struct {
-	Texts    []string
-	Regions  []RedactionRegion
-	Password string
+	Texts              []string
+	Regions            []RedactionRegion
+	Password           string
+	Verify             bool // fail if requested text remains extractable
+	AllowVisualRegions bool // acknowledge that region covers are not secure removal
 }
 
 // Redact removes matching literal text from copied page streams and covers
@@ -160,6 +216,9 @@ func Redact(inputPath, outputPath string, opts RedactOptions) error {
 	if len(opts.Texts) == 0 && len(opts.Regions) == 0 {
 		return errors.New("pdf: redaction requires text or regions")
 	}
+	if len(opts.Regions) > 0 && !opts.AllowVisualRegions {
+		return errors.New("pdf: rectangular regions are visual covers, not secure redaction; set AllowVisualRegions to acknowledge")
+	}
 	regionsByPage := make(map[int][]RedactionRegion)
 	for _, region := range opts.Regions {
 		if region.Page < 1 {
@@ -167,11 +226,15 @@ func Redact(inputPath, outputPath string, opts RedactOptions) error {
 		}
 		regionsByPage[region.Page-1] = append(regionsByPage[region.Page-1], region)
 	}
-	return reader.CopyPagesFile(inputPath, outputPath, reader.CopyOptions{
+	if err := reader.CopyPagesFile(inputPath, outputPath, reader.CopyOptions{
 		Password: opts.Password,
 		ContentTransform: func(_ int, content []byte) []byte {
 			return replaceContentStrings(content, opts.Texts, func(s, needle string) string {
-				return strings.ReplaceAll(s, needle, strings.Repeat(" ", len([]rune(needle))))
+				if needle == "" {
+					return s
+				}
+				replacement := strings.Repeat("X", len([]rune(needle)))
+				return strings.ReplaceAll(s, needle, replacement)
 			})
 		},
 		Overlay: func(pageIndex int, _ *document.Page) []byte {
@@ -181,7 +244,21 @@ func Redact(inputPath, outputPath string, opts RedactOptions) error {
 			}
 			return []byte(out.String())
 		},
-	})
+	}); err != nil {
+		return err
+	}
+	if opts.Verify && len(opts.Texts) > 0 {
+		text, err := ToText(outputPath, converter.ConvertOptions{Password: opts.Password, Strict: true})
+		if err != nil {
+			return fmt.Errorf("verifying redaction: %w", err)
+		}
+		for _, needle := range opts.Texts {
+			if needle != "" && strings.Contains(text, needle) {
+				return fmt.Errorf("pdf: redaction verification failed: %q remains extractable", needle)
+			}
+		}
+	}
+	return nil
 }
 
 // PDFComparison describes a text/metadata comparison between two PDFs.

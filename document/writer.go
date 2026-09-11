@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"sort"
+	"strings"
 
 	"github.com/oarkflow/pdf/core"
 	pdffont "github.com/oarkflow/pdf/font"
@@ -15,11 +17,12 @@ import (
 //
 // Writer is not safe for concurrent use. Callers must synchronize access externally.
 type Writer struct {
-	objects  []core.PdfIndirectObject
-	pages    []int // object numbers of page objects
-	info     *core.PdfDictionary
-	nextObj  int
-	fontObjs map[string]int // font name -> object number (cached)
+	objects      []core.PdfIndirectObject
+	pages        []int // object numbers of page objects
+	info         *core.PdfDictionary
+	nextObj      int
+	fontObjs     map[string]int // font name -> object number (cached)
+	destinations []writerDestination
 
 	// PDF/A fields
 	metadataRef   int   // object number for /Metadata on catalog
@@ -43,6 +46,12 @@ type Writer struct {
 	displayTitle   bool
 	flattenAlpha   bool
 	pdfVersion     string
+}
+
+type writerDestination struct {
+	name       string
+	pageObjNum int
+	x, y       float64
 }
 
 // NewWriter creates a new Writer ready to accept objects.
@@ -206,10 +215,14 @@ func (w *Writer) AddPage(page *Page) (int, error) {
 			annotDict.Set("Border", core.PdfArray{
 				core.PdfNumber(0), core.PdfNumber(0), core.PdfNumber(0),
 			})
-			actionDict := core.NewDictionary()
-			actionDict.Set("S", core.PdfName("URI"))
-			actionDict.Set("URI", core.PdfString(link.URI))
-			annotDict.Set("A", actionDict)
+			if strings.HasPrefix(link.URI, "#") {
+				annotDict.Set("Dest", core.PdfString(strings.TrimPrefix(link.URI, "#")))
+			} else {
+				actionDict := core.NewDictionary()
+				actionDict.Set("S", core.PdfName("URI"))
+				actionDict.Set("URI", core.PdfString(link.URI))
+				annotDict.Set("A", actionDict)
+			}
 			annotNum := w.AddObject(annotDict)
 			annotRefs = append(annotRefs, core.PdfIndirectReference{ObjectNumber: annotNum})
 		}
@@ -218,6 +231,11 @@ func (w *Writer) AddPage(page *Page) (int, error) {
 
 	num := w.AddObject(pageDict)
 	w.pages = append(w.pages, num)
+	for _, destination := range page.Destinations {
+		if destination.Name != "" {
+			w.destinations = append(w.destinations, writerDestination{name: destination.Name, pageObjNum: num, x: destination.X, y: destination.Y})
+		}
+	}
 	return num, nil
 }
 
@@ -448,6 +466,20 @@ func (w *Writer) WriteTo(out io.Writer) (int64, error) {
 	catalog := core.NewDictionary()
 	catalog.Set("Type", core.PdfName("Catalog"))
 	catalog.Set("Pages", ref(pagesNum))
+	if len(w.destinations) > 0 {
+		sort.Slice(w.destinations, func(i, j int) bool { return w.destinations[i].name < w.destinations[j].name })
+		names := make(core.PdfArray, 0, len(w.destinations)*2)
+		for _, destination := range w.destinations {
+			names = append(names, core.PdfString(destination.name), core.PdfArray{
+				ref(destination.pageObjNum), core.PdfName("XYZ"), core.PdfNumber(destination.x), core.PdfNumber(destination.y), core.PdfNumber(0),
+			})
+		}
+		dests := core.NewDictionary()
+		dests.Set("Names", names)
+		nameTree := core.NewDictionary()
+		nameTree.Set("Dests", dests)
+		catalog.Set("Names", nameTree)
+	}
 	if w.language != "" {
 		catalog.Set("Lang", core.PdfString(w.language))
 	}
