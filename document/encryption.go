@@ -14,30 +14,41 @@ func (d *Document) applyEncryption(w *Writer) error {
 
 // ApplyEncryption configures a Writer to encrypt its output.
 func ApplyEncryption(w *Writer, cfg core.EncryptionConfig) error {
-	if cfg.Algorithm == core.AES_256 {
-		return fmt.Errorf("AES-256 PDF encryption is not supported yet; use AES-128")
-	}
-
 	// 1. Generate a random 16-byte document ID.
 	docID := make([]byte, 16)
 	if _, err := rand.Read(docID); err != nil {
 		return fmt.Errorf("generate document ID: %w", err)
 	}
 
-	// 2. Compute O and U values.
-	oValue, err := core.ComputeOwnerPasswordValue(cfg)
-	if err != nil {
-		return fmt.Errorf("compute owner password: %w", err)
-	}
-	uValue, err := core.ComputeUserPasswordValue(cfg, docID)
-	if err != nil {
-		return fmt.Errorf("compute user password: %w", err)
-	}
-
-	// 3. Compute encryption key.
-	encKey, err := core.ComputeEncryptionKey(cfg, docID)
-	if err != nil {
-		return fmt.Errorf("compute encryption key: %w", err)
+	// 2/3. Compute O, U, and the file encryption key. AES-256 (revision 5)
+	// uses a structurally different handler (the key is generated
+	// independently of the password, and O/U/OE/UE wrap it - see
+	// core.ComputeAES256SecurityHandler) from RC4/AES-128 (revisions 2-4,
+	// where the key is derived from the password/document ID).
+	var oValue, uValue, oeValue, ueValue, permsValue, encKey []byte
+	var err error
+	if cfg.Algorithm == core.AES_256 {
+		encKey, err = core.GenerateAES256FileKey()
+		if err != nil {
+			return fmt.Errorf("generate AES-256 file key: %w", err)
+		}
+		oValue, uValue, oeValue, ueValue, permsValue, err = core.ComputeAES256SecurityHandler(cfg, encKey)
+		if err != nil {
+			return fmt.Errorf("compute AES-256 security handler: %w", err)
+		}
+	} else {
+		oValue, err = core.ComputeOwnerPasswordValue(cfg)
+		if err != nil {
+			return fmt.Errorf("compute owner password: %w", err)
+		}
+		uValue, err = core.ComputeUserPasswordValue(cfg, docID)
+		if err != nil {
+			return fmt.Errorf("compute user password: %w", err)
+		}
+		encKey, err = core.ComputeEncryptionKey(cfg, docID)
+		if err != nil {
+			return fmt.Errorf("compute encryption key: %w", err)
+		}
 	}
 
 	// 4. Determine V, R, Length, SubFilter based on algorithm.
@@ -71,6 +82,15 @@ func ApplyEncryption(w *Writer, cfg core.EncryptionConfig) error {
 	encDict.Set("O", core.PdfHexString(oValue))
 	encDict.Set("U", core.PdfHexString(uValue))
 	encDict.Set("P", core.PdfInteger(int64(int32(cfg.Permissions))))
+
+	if cfg.Algorithm == core.AES_256 {
+		// Without OE/UE/Perms, a reader has no way to recover the file key
+		// from a password at all - these are required, not optional, for
+		// revision 5.
+		encDict.Set("OE", core.PdfHexString(oeValue))
+		encDict.Set("UE", core.PdfHexString(ueValue))
+		encDict.Set("Perms", core.PdfHexString(permsValue))
+	}
 
 	if cfg.Algorithm == AES_128 || cfg.Algorithm == AES_256 {
 		// Add CF (crypt filter) dictionary for AES

@@ -3,6 +3,7 @@ package reader
 import (
 	"bytes"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/oarkflow/pdf/core"
@@ -203,6 +204,91 @@ func TestOpenWithPassword_WrongPassword(t *testing.T) {
 	})
 	p := doc.NewPage()
 	p.Contents = []byte("BT /F1 12 Tf 100 700 Td (Nope) Tj ET")
+
+	var buf bytes.Buffer
+	if _, err := doc.WriteTo(&buf); err != nil {
+		t.Fatalf("WriteTo: %v", err)
+	}
+
+	if _, err := OpenWithPassword(buf.Bytes(), "wrong-password"); err == nil {
+		t.Fatal("expected password error")
+	}
+}
+
+// TestOpenWithPassword_AES256 is the primary end-to-end regression test for
+// AES-256 PDF encryption/decryption (previously entirely unimplemented -
+// see core.ComputeAES256SecurityHandler and this reader's
+// configureDecryption v==5 branch): a document is written with the owner
+// password, then reopened and its text extracted using only the user
+// password, exercising encryption, /Encrypt dictionary construction (O/U/
+// OE/UE/Perms), authentication, and content decryption end-to-end.
+func TestOpenWithPassword_AES256(t *testing.T) {
+	doc, err := document.NewDocument(document.A4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc.SetEncryption(core.EncryptionConfig{
+		Algorithm:     core.AES_256,
+		OwnerPassword: "owner-secret-256",
+		UserPassword:  "user-secret-256",
+		Permissions:   0xFFFFF0C4,
+	})
+	p := doc.NewPage()
+	p.Contents = []byte("BT /F1 12 Tf 100 700 Td (Hello AES256) Tj ET")
+
+	var buf bytes.Buffer
+	if _, err := doc.WriteTo(&buf); err != nil {
+		t.Fatalf("WriteTo: %v", err)
+	}
+
+	pdf := buf.String()
+	for _, want := range []string{"/Encrypt", "/OE", "/UE", "/Perms"} {
+		if !strings.Contains(pdf, want) {
+			t.Fatalf("expected PDF to contain %s", want)
+		}
+	}
+
+	r, err := OpenWithPassword(buf.Bytes(), "user-secret-256")
+	if err != nil {
+		t.Fatalf("OpenWithPassword with user password: %v", err)
+	}
+	text, err := r.ExtractText(0)
+	if err != nil {
+		t.Fatalf("ExtractText: %v", err)
+	}
+	if text != "Hello AES256" {
+		t.Fatalf("text = %q, want %q", text, "Hello AES256")
+	}
+
+	// The owner password must also open the document.
+	rOwner, err := OpenWithPassword(buf.Bytes(), "owner-secret-256")
+	if err != nil {
+		t.Fatalf("OpenWithPassword with owner password: %v", err)
+	}
+	ownerText, err := rOwner.ExtractText(0)
+	if err != nil {
+		t.Fatalf("ExtractText via owner password: %v", err)
+	}
+	if ownerText != "Hello AES256" {
+		t.Fatalf("owner-opened text = %q, want %q", ownerText, "Hello AES256")
+	}
+}
+
+// TestOpenWithPassword_AES256_WrongPassword confirms an incorrect password
+// is rejected rather than silently producing garbage decrypted content.
+func TestOpenWithPassword_AES256_WrongPassword(t *testing.T) {
+	doc, err := document.NewDocument(document.A4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc.SetEncryption(core.EncryptionConfig{
+		Algorithm:     core.AES_256,
+		OwnerPassword: "owner-secret-256",
+		UserPassword:  "user-secret-256",
+		Permissions:   0xFFFFF0C4,
+	})
+	p := doc.NewPage()
+	p.Contents = []byte("BT /F1 12 Tf 100 700 Td (Nope256) Tj ET")
 
 	var buf bytes.Buffer
 	if _, err := doc.WriteTo(&buf); err != nil {

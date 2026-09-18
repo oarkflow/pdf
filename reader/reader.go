@@ -274,8 +274,48 @@ func configureDecryption(resolver *Resolver, trailer map[string]interface{}, pas
 	}
 
 	v, _ := getInt(encDict, "/V")
+
+	oValue, ok := encDict["/O"].(string)
+	if !ok {
+		return fmt.Errorf("missing /O in encryption dictionary")
+	}
+	uValue, ok := encDict["/U"].(string)
+	if !ok {
+		return fmt.Errorf("missing /U in encryption dictionary")
+	}
+
 	if v == 5 {
-		return fmt.Errorf("AES-256 encrypted PDFs are not supported yet")
+		// AES-256 (Standard Security Handler revision 5) uses a different
+		// authentication scheme entirely - OE/UE, not the password/document
+		// ID-derived key of revisions 2-4 - see
+		// core.AuthenticateAES256UserPassword/OwnerPassword.
+		oeValue, ok := encDict["/OE"].(string)
+		if !ok {
+			return fmt.Errorf("missing /OE in encryption dictionary")
+		}
+		ueValue, ok := encDict["/UE"].(string)
+		if !ok {
+			return fmt.Errorf("missing /UE in encryption dictionary")
+		}
+		key, matched, err := core.AuthenticateAES256UserPassword(password, []byte(uValue), []byte(ueValue))
+		if err != nil {
+			return err
+		}
+		if !matched {
+			key, matched, err = core.AuthenticateAES256OwnerPassword(password, []byte(oValue), []byte(uValue), []byte(oeValue))
+			if err != nil {
+				return err
+			}
+		}
+		if !matched {
+			return fmt.Errorf("invalid password for encrypted PDF")
+		}
+		resolver.crypt = &decryptState{
+			key:           key,
+			algorithm:     core.AES_256,
+			encryptObjNum: ref.ObjNum,
+		}
+		return nil
 	}
 
 	var algorithm core.EncryptionAlgorithm
@@ -288,14 +328,6 @@ func configureDecryption(resolver *Resolver, trailer map[string]interface{}, pas
 		return fmt.Errorf("unsupported encryption version %d", v)
 	}
 
-	oValue, ok := encDict["/O"].(string)
-	if !ok {
-		return fmt.Errorf("missing /O in encryption dictionary")
-	}
-	uValue, ok := encDict["/U"].(string)
-	if !ok {
-		return fmt.Errorf("missing /U in encryption dictionary")
-	}
 	pInt, ok := getInt(encDict, "/P")
 	if !ok {
 		return fmt.Errorf("missing /P in encryption dictionary")

@@ -66,7 +66,13 @@ func TestApplyEncryptionAES128(t *testing.T) {
 	}
 }
 
-func TestApplyEncryptionAES256Unsupported(t *testing.T) {
+// TestApplyEncryptionAES256 is a regression test: AES-256 encryption used
+// to be rejected outright by ApplyEncryption ("AES-256 PDF encryption is
+// not supported yet; use AES-128"). It is now implemented (Standard
+// Security Handler revision 5 - see core.ComputeAES256SecurityHandler); a
+// full write+read+decrypt round trip is covered in
+// reader.TestOpenWithPassword_AES256.
+func TestApplyEncryptionAES256(t *testing.T) {
 	doc, _ := NewDocument(PageSize{Width: 612, Height: 792})
 	doc.SetEncryption(core.EncryptionConfig{
 		Algorithm:     core.AES_256,
@@ -79,8 +85,24 @@ func TestApplyEncryptionAES256Unsupported(t *testing.T) {
 
 	var buf bytes.Buffer
 	_, err := doc.WriteTo(&buf)
-	if err == nil {
-		t.Fatal("expected AES-256 to be rejected")
+	if err != nil {
+		t.Fatalf("WriteTo failed: %v", err)
+	}
+
+	pdf := buf.String()
+	if !strings.Contains(pdf, "/Encrypt") {
+		t.Error("PDF should contain /Encrypt")
+	}
+	if !strings.Contains(pdf, "/V 5") || !strings.Contains(pdf, "/R 5") {
+		t.Error("AES-256 should be written with V=5 R=5")
+	}
+	if !strings.Contains(pdf, "/CFM /AESV3") {
+		t.Error("AES-256 should use crypt filter method AESV3")
+	}
+	for _, want := range []string{"/O ", "/U ", "/OE", "/UE", "/Perms"} {
+		if !strings.Contains(pdf, want) {
+			t.Errorf("expected PDF to contain %s", want)
+		}
 	}
 }
 
