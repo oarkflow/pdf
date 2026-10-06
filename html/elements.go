@@ -582,12 +582,52 @@ func (e *TableElement) PlanLayout(area layout.LayoutArea) layout.LayoutPlan {
 
 	consumed := bm.ContentTop()
 	var blocks []layout.PlacedBlock
+	availableHeight := area.Height - bm.TotalVertical()
+
+	// Determine header row count (rows with IsHeader cells)
+	headerRowCount := 0
+	for _, row := range e.Rows {
+		if len(row.Cells) > 0 && row.Cells[0].IsHeader {
+			headerRowCount++
+		} else {
+			break
+		}
+	}
 
 	for rowIdx, row := range e.Rows {
+		cRowHeight := rowLayouts[rowIdx].height
+
+		// Check if this row fits in remaining space
+		if consumed+cRowHeight > availableHeight && rowIdx >= headerRowCount {
+			// Create overflow table with remaining rows
+			overflowRows := make([]TableRow, 0, len(e.Rows)-rowIdx)
+			// Include header rows in overflow so they repeat on next page
+			for i := 0; i < headerRowCount; i++ {
+				overflowRows = append(overflowRows, e.Rows[i])
+			}
+			for i := rowIdx; i < len(e.Rows); i++ {
+				overflowRows = append(overflowRows, e.Rows[i])
+			}
+
+			consumed += bm.PaddingBottom + bm.BorderBottomWidth + bm.MarginBottom
+
+			overflow := &TableElement{
+				Rows:     overflowRows,
+				Style:    e.Style,
+				BoxModel: bm,
+			}
+
+			return layout.LayoutPlan{
+				Status:   layout.LayoutPartial,
+				Consumed: consumed,
+				Blocks:   blocks,
+				Overflow: overflow,
+			}
+		}
+
 		cRowIdx := rowIdx
 		cRow := row
 		cRowY := consumed
-		cRowHeight := rowLayouts[rowIdx].height
 		cTableWidth := tableWidth
 		cCellPad := cellPad
 		cBm := bm
